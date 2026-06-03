@@ -39,7 +39,7 @@
 ## 快速开始
 
 ```sh
-git clone https://github.com/YOUR_USERNAME/claude-code-sentinel.git
+git clone git@github.com:hlongc/claude-code-sentinel.git
 cd claude-code-sentinel
 make test
 make install-managed
