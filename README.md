@@ -36,7 +36,7 @@ claude-code-sentinel install-managed
 - [配置方式](#配置方式)
 - [终端活跃时不打扰](#终端活跃时不打扰)
 - [支持范围](#支持范围)
-- [开发](#开发)
+- [维护者文档](#维护者文档)
 - [许可证](#许可证)
 
 ## 为什么需要它
@@ -129,7 +129,7 @@ curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/in
 CLAUDE_SENTINEL_VERSION=v0.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
-### 源码安装
+### 从源码安装
 
 ```sh
 git clone git@github.com:hlongc/claude-code-sentinel.git
@@ -224,42 +224,9 @@ Sentinel 基于 Claude Code hooks 工作，因此它能处理 Claude Code 通过
 
 它不会监听已经运行中的 shell 命令内部交互提示。例如 Claude Code 启动某个 CLI 后，该 CLI 自己询问 `Continue? [y/N]`，这种情况需要额外的 PTY 包装层。
 
-## 开发
+## 维护者文档
 
-```sh
-make build
-make test
-```
-
-二进制会输出到：
-
-```text
-release/claude-code-sentinel
-```
-
-生成的二进制不会提交到 git。
-
-创建 GitHub Release：
-
-```sh
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-推送 `v*` tag 后，GitHub Actions 会：
-
-- 构建 macOS universal binary
-- 上传 GitHub Release 资产
-- 计算 SHA256
-- 自动更新 `hlongc/homebrew-tap` 中的 Formula
-
-要启用 Homebrew tap 自动更新，需要在 `hlongc/claude-code-sentinel` 仓库配置 secret：
-
-```text
-TAP_GITHUB_TOKEN
-```
-
-这个 token 建议使用 fine-grained PAT，只授予 `hlongc/homebrew-tap` 仓库 `Contents: Read and write` 权限。
+本地开发、发版和 Homebrew tap 自动化请看 [Maintainer Guide](docs/maintainer.md)。
 
 ## 许可证
 

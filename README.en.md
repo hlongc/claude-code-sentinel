@@ -36,7 +36,7 @@ claude-code-sentinel install-managed
 - [Configuration](#configuration)
 - [Active Terminal Suppression](#active-terminal-suppression)
 - [What It Handles](#what-it-handles)
-- [Development](#development)
+- [Maintainer Guide](#maintainer-guide)
 - [License](#license)
 
 ## Why
@@ -224,42 +224,9 @@ Sentinel uses Claude Code hooks, so it handles events Claude Code exposes throug
 
 It does not watch arbitrary interactive subprocess prompts inside a running shell command, such as a CLI asking `Continue? [y/N]` after Claude Code has already launched it. That would require a PTY wrapper layer.
 
-## Development
+## Maintainer Guide
 
-```sh
-make build
-make test
-```
-
-The binary is written to:
-
-```text
-release/claude-code-sentinel
-```
-
-Generated binaries are ignored by git.
-
-Create a GitHub release:
-
-```sh
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-After pushing a `v*` tag, GitHub Actions:
-
-- builds a macOS universal binary
-- uploads GitHub Release assets
-- computes the SHA256 checksum
-- updates the Formula in `hlongc/homebrew-tap`
-
-To enable automatic Homebrew tap updates, configure this secret in the `hlongc/claude-code-sentinel` repository:
-
-```text
-TAP_GITHUB_TOKEN
-```
-
-Use a fine-grained PAT with `Contents: Read and write` access to the `hlongc/homebrew-tap` repository.
+For local development, release, and Homebrew tap automation, see the [Maintainer Guide](docs/maintainer.md).
 
 ## License
 
