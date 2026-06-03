@@ -126,7 +126,7 @@ curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/in
 指定版本：
 
 ```sh
-CLAUDE_SENTINEL_VERSION=v0.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
+CLAUDE_SENTINEL_VERSION=v0.1.1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
 ### 从源码安装

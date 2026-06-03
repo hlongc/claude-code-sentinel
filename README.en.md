@@ -126,7 +126,7 @@ curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/in
 Install a specific version:
 
 ```sh
-CLAUDE_SENTINEL_VERSION=v0.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
+CLAUDE_SENTINEL_VERSION=v0.1.1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
 ### Install From Source
