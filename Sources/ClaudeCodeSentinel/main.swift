@@ -38,6 +38,10 @@ func prettyJsonString(_ value: Any) -> String {
     return String(data: data, encoding: .utf8)!
 }
 
+func isMeaningfulText(_ value: String) -> Bool {
+    !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
 func parseJsonObject(from data: Data) throws -> [String: Any] {
     if data.isEmpty {
         return [:]
@@ -95,21 +99,101 @@ func titleFor(_ input: [String: Any], _ label: String) -> String {
     "\(projectName(input)) - \(label) - \(sessionSuffix(input))"
 }
 
+func recursiveStringValue(_ value: Any, keys: Set<String>) -> String? {
+    if let dictionary = value as? [String: Any] {
+        for key in keys {
+            if let text = dictionary[key] as? String, isMeaningfulText(text) {
+                return text
+            }
+        }
+        for child in dictionary.values {
+            if let text = recursiveStringValue(child, keys: keys) {
+                return text
+            }
+        }
+    }
+    if let array = value as? [Any] {
+        for child in array {
+            if let text = recursiveStringValue(child, keys: keys) {
+                return text
+            }
+        }
+    }
+    return nil
+}
+
+func permissionRuleSummary(_ input: [String: Any]) -> String {
+    let suggestions = arrayValue(input, "permission_suggestions")
+    let ruleLines = suggestions.flatMap { suggestion -> [String] in
+        let behavior = suggestion["behavior"] as? String ?? "allow"
+        let rules = suggestion["rules"] as? [[String: Any]] ?? []
+        return rules.map { rule in
+            let name = rule["toolName"] as? String ?? stringValue(input, "tool_name")
+            let content = rule["ruleContent"] as? String ?? "*"
+            return "- \(behavior): \(name)\(content.isEmpty ? "" : " \(content)")"
+        }
+    }
+    return ruleLines.joined(separator: "\n")
+}
+
+func inferredPermissionPrompt(tool: String, filePath: String?) -> String {
+    guard let filePath, isMeaningfulText(filePath) else {
+        return "Claude Code is requesting permission for \(tool.isEmpty ? "this tool" : tool)."
+    }
+
+    let fileName = URL(fileURLWithPath: filePath).lastPathComponent
+    switch tool {
+    case "Write":
+        return "Do you want to create \(fileName.isEmpty ? filePath : fileName)?"
+    case "Edit":
+        return "Do you want to edit \(fileName.isEmpty ? filePath : fileName)?"
+    case "Read":
+        return "Do you want to read \(fileName.isEmpty ? filePath : fileName)?"
+    default:
+        return "Claude Code is requesting permission for \(tool)."
+    }
+}
+
 func formatToolInput(_ input: [String: Any]) -> String {
     let tool = stringValue(input, "tool_name")
     let toolInput = dictValue(input, "tool_input")
 
-    if tool == "Bash", let command = toolInput["command"] as? String {
+    if tool == "Bash" {
+        let command = (toolInput["command"] as? String)
+            ?? recursiveStringValue(input, keys: ["command", "cmd", "script"])
         var parts: [String] = []
-        if let description = toolInput["description"] as? String, !description.isEmpty {
+        if let description = (toolInput["description"] as? String)
+            ?? recursiveStringValue(input, keys: ["description", "summary"]),
+           isMeaningfulText(description) {
             parts.append("Description:\n\(description)")
         }
-        parts.append("Command:\n\(command)")
-        return parts.joined(separator: "\n\n")
+        if let command, isMeaningfulText(command) {
+            parts.append("Command:\n\(command)")
+        }
+        let rules = permissionRuleSummary(input)
+        if isMeaningfulText(rules) {
+            parts.append("Permission options:\n\(rules)")
+        }
+        if !parts.isEmpty {
+            return parts.joined(separator: "\n\n")
+        }
     }
 
-    if ["Edit", "Write", "Read"].contains(tool), let filePath = toolInput["file_path"] as? String {
-        return "File:\n\(filePath)\n\nInput:\n\(prettyJsonString(toolInput))"
+    if ["Edit", "Write", "Read"].contains(tool) {
+        let filePath = (toolInput["file_path"] as? String)
+            ?? recursiveStringValue(input, keys: ["file_path", "filePath", "path"])
+        var parts = [inferredPermissionPrompt(tool: tool, filePath: filePath)]
+        if let filePath, isMeaningfulText(filePath) {
+            parts.append("File:\n\(filePath)")
+        }
+        if !toolInput.isEmpty {
+            parts.append("Input:\n\(prettyJsonString(toolInput))")
+        }
+        let rules = permissionRuleSummary(input)
+        if isMeaningfulText(rules) {
+            parts.append("Permission options:\n\(rules)")
+        }
+        return parts.joined(separator: "\n\n")
     }
 
     if tool == "AskUserQuestion", let questions = toolInput["questions"] as? [[String: Any]] {
@@ -122,7 +206,22 @@ func formatToolInput(_ input: [String: Any]) -> String {
         }.joined(separator: "\n\n")
     }
 
-    return prettyJsonString(toolInput)
+    let renderedInput = toolInput.isEmpty ? "" : prettyJsonString(toolInput)
+    if isMeaningfulText(renderedInput) {
+        return renderedInput
+    }
+
+    let rules = permissionRuleSummary(input)
+    if isMeaningfulText(rules) {
+        return "Claude Code is requesting permission for \(tool.isEmpty ? "this tool" : tool).\n\nPermission options:\n\(rules)"
+    }
+
+    let payload = prettyJsonString(input)
+    if isMeaningfulText(payload) {
+        return "Claude Code is requesting permission for \(tool.isEmpty ? "this tool" : tool).\n\nHook payload:\n\(payload)"
+    }
+
+    return "Claude Code is requesting permission."
 }
 
 struct ScriptResult {
@@ -1256,6 +1355,20 @@ func runTests() {
     precondition(projectName(["cwd": "/tmp/my-project"]) == "my-project")
     precondition(titleFor(["cwd": "/tmp/my-project", "session_id": "abc123456789"], "Done") == "my-project - Done - 23456789")
     precondition(formatToolInput(sample).contains("npm test"))
+    precondition(formatToolInput([
+        "tool_name": "Write",
+        "tool_input": ["file_path": "/tmp/bubbleSort.js"]
+    ]).contains("Do you want to create bubbleSort.js?"))
+    precondition(formatToolInput([
+        "tool_name": "Bash",
+        "tool_input": [:],
+        "permission_suggestions": [
+            [
+                "behavior": "allow",
+                "rules": [["toolName": "Bash", "ruleContent": "node *"]]
+            ]
+        ]
+    ]).contains("Permission options"))
     let settings = buildHookSettings(commandPath: "/tmp/claude-code-sentinel")
     let hooks = settings["hooks"] as? [String: Any]
     precondition(hooks?["PermissionRequest"] != nil)
