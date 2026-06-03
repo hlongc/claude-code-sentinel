@@ -38,7 +38,15 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 
 ## Quick Start
 
-One-line install. When a release binary exists, the installer downloads it directly; otherwise it falls back to a source build:
+Using Homebrew:
+
+```sh
+brew tap hlongc/tap
+brew install claude-code-sentinel
+claude-code-sentinel install-managed
+```
+
+Or use the one-line install script. When a release binary exists, the installer downloads it directly; otherwise it falls back to a source build:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
@@ -61,6 +69,21 @@ PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc
 ```
 
 ## Installation Options
+
+### Homebrew
+
+```sh
+brew tap hlongc/tap
+brew install claude-code-sentinel
+claude-code-sentinel install-managed
+```
+
+Upgrade:
+
+```sh
+brew update
+brew upgrade claude-code-sentinel
+```
 
 ### Release Binary
 

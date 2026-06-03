@@ -38,7 +38,15 @@
 
 ## 快速开始
 
-一行安装。发布二进制存在时会直接下载二进制；否则会回退到源码编译：
+使用 Homebrew：
+
+```sh
+brew tap hlongc/tap
+brew install claude-code-sentinel
+claude-code-sentinel install-managed
+```
+
+或使用一行安装脚本。发布二进制存在时会直接下载二进制；否则会回退到源码编译：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
@@ -61,6 +69,21 @@ PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc
 ```
 
 ## 安装方式
+
+### Homebrew
+
+```sh
+brew tap hlongc/tap
+brew install claude-code-sentinel
+claude-code-sentinel install-managed
+```
+
+升级：
+
+```sh
+brew update
+brew upgrade claude-code-sentinel
+```
 
 ### 使用 Release 二进制
 
