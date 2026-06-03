@@ -1,0 +1,5 @@
+release/
+.DS_Store
+*.log
+/.build/
+DerivedData/
