@@ -6,6 +6,7 @@ let maxDialogChars = 2600
 let maxNotificationChars = 180
 let defaultActiveIdleThresholdSeconds = 8.0
 let defaultActiveGraceSeconds = 15.0
+let defaultIdleAfterStopSuppressionSeconds = 90.0
 let activePollIntervalSeconds = 1.0
 let dialogMinWidth: CGFloat = 440
 let dialogMaxWidth: CGFloat = 520
@@ -891,6 +892,14 @@ func activeGraceSeconds() -> Double {
     return defaultActiveGraceSeconds
 }
 
+func idleAfterStopSuppressionSeconds() -> Double {
+    let raw = ProcessInfo.processInfo.environment["CLAUDE_SENTINEL_IDLE_AFTER_STOP_SECONDS"] ?? ""
+    if let value = Double(raw), value >= 0 {
+        return value
+    }
+    return defaultIdleAfterStopSuppressionSeconds
+}
+
 func systemIdleSeconds() -> Double {
     let anyEvent = CGEventType(rawValue: UInt32.max)!
     let seconds = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyEvent)
@@ -1039,6 +1048,80 @@ func shouldSuppressBecauseUserIsActive(event: String, input: [String: Any]) -> B
     return true
 }
 
+func stateDirectory() -> URL {
+    let directory = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Application Support/ClaudeCodeSentinel", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+func recentStopsPath() -> URL {
+    stateDirectory().appendingPathComponent("recent-stops.json")
+}
+
+func sessionStateKey(_ input: [String: Any]) -> String {
+    let session = stringValue(input, "session_id")
+    let cwd = stringValue(input, "cwd")
+    if session.isEmpty && cwd.isEmpty {
+        return "unknown"
+    }
+    return "\(session)|\(cwd)"
+}
+
+func readRecentStops() -> [String: TimeInterval] {
+    guard let data = try? Data(contentsOf: recentStopsPath()),
+          let decoded = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Double] else {
+        return [:]
+    }
+    return decoded
+}
+
+func writeRecentStops(_ stops: [String: TimeInterval]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: stops, options: [.sortedKeys]) else {
+        return
+    }
+    try? data.write(to: recentStopsPath(), options: [.atomic])
+}
+
+func recordStop(_ input: [String: Any], now: Date = Date()) {
+    let cutoff = now.timeIntervalSince1970 - max(idleAfterStopSuppressionSeconds(), 0)
+    var stops = readRecentStops().filter { $0.value >= cutoff }
+    stops[sessionStateKey(input)] = now.timeIntervalSince1970
+    writeRecentStops(stops)
+}
+
+func shouldSuppressIdlePromptAfterRecentStop(_ input: [String: Any], now: Date = Date()) -> Bool {
+    guard stringValue(input, "notification_type") == "idle_prompt" else {
+        return false
+    }
+
+    let window = idleAfterStopSuppressionSeconds()
+    if window <= 0 {
+        return false
+    }
+
+    let key = sessionStateKey(input)
+    guard let stoppedAt = readRecentStops()[key] else {
+        return false
+    }
+
+    let age = now.timeIntervalSince1970 - stoppedAt
+    if age < 0 || age > window {
+        return false
+    }
+
+    appendDebugLog([
+        "event": "Notification",
+        "notificationType": stringValue(input, "notification_type"),
+        "project": projectName(input),
+        "session": sessionSuffix(input),
+        "decision": "suppress-recent-stop",
+        "secondsAfterStop": String(format: "%.1f", age),
+        "suppressionSeconds": String(format: "%.1f", window)
+    ])
+    return true
+}
+
 func firstAllowSuggestion(_ input: [String: Any]) -> [String: Any]? {
     arrayValue(input, "permission_suggestions").first { suggestion in
         suggestion["behavior"] as? String == "allow"
@@ -1172,6 +1255,10 @@ func handlePermissionRequest(_ input: [String: Any]) -> [String: Any] {
 }
 
 func handleNotification(_ input: [String: Any]) {
+    if shouldSuppressIdlePromptAfterRecentStop(input) {
+        return
+    }
+
     if shouldSuppressBecauseUserIsActive(event: "Notification", input: input) {
         return
     }
@@ -1195,6 +1282,8 @@ func hasActiveBackgroundWork(_ input: [String: Any]) -> Bool {
 }
 
 func handleStop(_ input: [String: Any]) {
+    recordStop(input)
+
     if shouldSuppressBecauseUserIsActive(event: "Stop", input: input) {
         return
     }
@@ -1477,6 +1566,20 @@ func runTests() {
     precondition(hooks?["Stop"] != nil)
     precondition(!managedHooks(commandPath: "/tmp/claude-code-sentinel").isEmpty)
     precondition(shellQuote("/tmp/a b/c") == "'/tmp/a b/c'")
+    let stopInput: [String: Any] = [
+        "session_id": "recent-stop-session",
+        "cwd": "/tmp/recent-stop-project",
+        "hook_event_name": "Stop"
+    ]
+    let idleInput: [String: Any] = [
+        "session_id": "recent-stop-session",
+        "cwd": "/tmp/recent-stop-project",
+        "hook_event_name": "Notification",
+        "notification_type": "idle_prompt"
+    ]
+    recordStop(stopInput, now: Date(timeIntervalSince1970: 1_000))
+    precondition(shouldSuppressIdlePromptAfterRecentStop(idleInput, now: Date(timeIntervalSince1970: 1_060)))
+    precondition(!shouldSuppressIdlePromptAfterRecentStop(idleInput, now: Date(timeIntervalSince1970: 1_200)))
     print("All tests passed.")
 }
 

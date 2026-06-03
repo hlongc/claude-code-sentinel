@@ -199,11 +199,14 @@ If the foreground window looks like the same Claude Code terminal and macOS has 
 
 Once the system has been idle for more than 8 seconds, or when another app is foreground, Sentinel shows the desktop prompt. If the hook fires while you are still in the Claude terminal, Sentinel keeps watching for up to 15 seconds and shows the prompt as soon as you switch away or become idle.
 
+Claude Code can send an `idle_prompt` about 60 seconds after `Stop` to say the session is waiting for more input. Sentinel suppresses that idle prompt for the same session for 90 seconds after `Stop` by default, so a completion notification is not immediately followed by a duplicate "waiting for input" notification.
+
 Tune the idle threshold and grace window in the environment where you start `claude`:
 
 ```sh
 export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=10
 export CLAUDE_SENTINEL_ACTIVE_GRACE_SECONDS=20
+export CLAUDE_SENTINEL_IDLE_AFTER_STOP_SECONDS=90
 claude
 ```
 

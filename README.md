@@ -199,11 +199,14 @@ make settings
 
 如果系统空闲超过 8 秒，或者当前前台是其他 app，Sentinel 会显示桌面浮窗。若 hook 触发瞬间你刚好还在 Claude 终端，Sentinel 会继续观察最多 15 秒；期间一旦你离开终端或系统进入空闲，就会补弹提醒。
 
+Claude Code 有时会在 `Stop` 后约 60 秒发送 `idle_prompt`，表示会话正在等待你继续输入。Sentinel 默认会抑制同一会话在 `Stop` 后 90 秒内的这类空闲提醒，避免刚收到完成通知又收到“等待输入”的重复提醒。
+
 可以在启动 `claude` 的环境中调整空闲阈值和观察时间：
 
 ```sh
 export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=10
 export CLAUDE_SENTINEL_ACTIVE_GRACE_SECONDS=20
+export CLAUDE_SENTINEL_IDLE_AFTER_STOP_SECONDS=90
 claude
 ```
 
