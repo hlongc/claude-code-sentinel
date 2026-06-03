@@ -197,12 +197,13 @@ make settings
 
 如果当前前台窗口看起来是同一个 Claude Code 终端，并且 macOS 最近收到过键盘或鼠标输入，Sentinel 会静默，让终端原生 UI 处理这个提示。
 
-如果系统空闲超过 20 秒，或者当前前台是其他 app，Sentinel 会显示桌面浮窗。
+如果系统空闲超过 8 秒，或者当前前台是其他 app，Sentinel 会显示桌面浮窗。若 hook 触发瞬间你刚好还在 Claude 终端，Sentinel 会继续观察最多 15 秒；期间一旦你离开终端或系统进入空闲，就会补弹提醒。
 
-可以在启动 `claude` 的环境中调整空闲阈值：
+可以在启动 `claude` 的环境中调整空闲阈值和观察时间：
 
 ```sh
-export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=30
+export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=10
+export CLAUDE_SENTINEL_ACTIVE_GRACE_SECONDS=20
 claude
 ```
 

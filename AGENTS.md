@@ -66,8 +66,11 @@ The suppression logic checks:
 Default idle threshold:
 
 ```sh
-CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=20
+CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=8
+CLAUDE_SENTINEL_ACTIVE_GRACE_SECONDS=15
 ```
+
+If a hook fires while the user still appears active in the Claude terminal, Sentinel polls for up to the grace window before suppressing. Logs use `show`, `show-after-wait`, or `suppress` decisions.
 
 Debug logs:
 

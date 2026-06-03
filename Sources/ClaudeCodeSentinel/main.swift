@@ -4,7 +4,9 @@ import CoreGraphics
 
 let maxDialogChars = 2600
 let maxNotificationChars = 180
-let defaultActiveIdleThresholdSeconds = 20.0
+let defaultActiveIdleThresholdSeconds = 8.0
+let defaultActiveGraceSeconds = 15.0
+let activePollIntervalSeconds = 1.0
 let dialogMinWidth: CGFloat = 440
 let dialogMaxWidth: CGFloat = 520
 let managedSettingsPath = "/Library/Application Support/ClaudeCode/managed-settings.json"
@@ -681,6 +683,14 @@ func activeIdleThresholdSeconds() -> Double {
     return defaultActiveIdleThresholdSeconds
 }
 
+func activeGraceSeconds() -> Double {
+    let raw = ProcessInfo.processInfo.environment["CLAUDE_SENTINEL_ACTIVE_GRACE_SECONDS"] ?? ""
+    if let value = Double(raw), value >= 0 {
+        return value
+    }
+    return defaultActiveGraceSeconds
+}
+
 func systemIdleSeconds() -> Double {
     let anyEvent = CGEventType(rawValue: UInt32.max)!
     let seconds = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyEvent)
@@ -760,28 +770,73 @@ func frontmostLooksLikeThisClaudeSession(appName: String, title: String, input: 
     return false
 }
 
-func shouldSuppressBecauseUserIsActive(event: String, input: [String: Any]) -> Bool {
+struct ActiveState {
+    let appName: String
+    let title: String
+    let idle: Double
+    let threshold: Double
+    let matchesClaudeTerminal: Bool
+
+    var shouldSuppress: Bool {
+        matchesClaudeTerminal && idle <= threshold
+    }
+}
+
+func currentActiveState(input: [String: Any]) -> ActiveState {
     let appName = frontmostApplicationName()
     let title = frontmostWindowTitle(appName: appName)
     let idle = systemIdleSeconds()
     let threshold = activeIdleThresholdSeconds()
     let matchesClaudeTerminal = frontmostLooksLikeThisClaudeSession(appName: appName, title: title, input: input)
-    let suppress = matchesClaudeTerminal && idle <= threshold
+    return ActiveState(
+        appName: appName,
+        title: title,
+        idle: idle,
+        threshold: threshold,
+        matchesClaudeTerminal: matchesClaudeTerminal
+    )
+}
 
+func logActiveDecision(event: String, input: [String: Any], state: ActiveState, decision: String, waitedSeconds: Double) {
     appendDebugLog([
         "event": event,
         "tool": stringValue(input, "tool_name"),
         "project": projectName(input),
         "session": sessionSuffix(input),
-        "frontApp": appName,
-        "frontTitle": title,
-        "idleSeconds": String(format: "%.1f", idle),
-        "thresholdSeconds": String(format: "%.1f", threshold),
-        "matchesClaudeTerminal": matchesClaudeTerminal ? "true" : "false",
-        "decision": suppress ? "suppress" : "show"
+        "frontApp": state.appName,
+        "frontTitle": state.title,
+        "idleSeconds": String(format: "%.1f", state.idle),
+        "thresholdSeconds": String(format: "%.1f", state.threshold),
+        "waitedSeconds": String(format: "%.1f", waitedSeconds),
+        "matchesClaudeTerminal": state.matchesClaudeTerminal ? "true" : "false",
+        "decision": decision
     ])
+}
 
-    return suppress
+func shouldSuppressBecauseUserIsActive(event: String, input: [String: Any]) -> Bool {
+    var state = currentActiveState(input: input)
+    if !state.shouldSuppress {
+        logActiveDecision(event: event, input: input, state: state, decision: "show", waitedSeconds: 0)
+        return false
+    }
+
+    let grace = activeGraceSeconds()
+    var waited = 0.0
+    while waited < grace {
+        let remaining = grace - waited
+        let interval = min(activePollIntervalSeconds, remaining)
+        Thread.sleep(forTimeInterval: interval)
+        waited += interval
+
+        state = currentActiveState(input: input)
+        if !state.shouldSuppress {
+            logActiveDecision(event: event, input: input, state: state, decision: "show-after-wait", waitedSeconds: waited)
+            return false
+        }
+    }
+
+    logActiveDecision(event: event, input: input, state: state, decision: "suppress", waitedSeconds: waited)
+    return true
 }
 
 func firstAllowSuggestion(_ input: [String: Any]) -> [String: Any]? {

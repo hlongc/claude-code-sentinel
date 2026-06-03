@@ -197,12 +197,13 @@ Add the printed `hooks` object to `~/.claude/settings.json`.
 
 If the foreground window looks like the same Claude Code terminal and macOS has received keyboard or mouse input recently, Sentinel suppresses the popover so the native terminal UI can handle the prompt.
 
-Once the system has been idle for more than 20 seconds, or when another app is foreground, Sentinel shows the desktop prompt.
+Once the system has been idle for more than 8 seconds, or when another app is foreground, Sentinel shows the desktop prompt. If the hook fires while you are still in the Claude terminal, Sentinel keeps watching for up to 15 seconds and shows the prompt as soon as you switch away or become idle.
 
-Tune the idle threshold in the environment where you start `claude`:
+Tune the idle threshold and grace window in the environment where you start `claude`:
 
 ```sh
-export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=30
+export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=10
+export CLAUDE_SENTINEL_ACTIVE_GRACE_SECONDS=20
 claude
 ```
 
