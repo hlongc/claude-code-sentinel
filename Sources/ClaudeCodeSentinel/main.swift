@@ -299,6 +299,93 @@ final class MultiChoiceHandler: NSObject {
     }
 }
 
+final class HoverChoiceButton: NSButton {
+    private let normalBackground = NSColor(calibratedWhite: 0.955, alpha: 1)
+    private let hoverBackground = NSColor(calibratedRed: 0, green: 0.36, blue: 1, alpha: 1)
+    private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        prepare()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        prepare()
+    }
+
+    private func prepare() {
+        isBordered = false
+        alignment = .left
+        wantsLayer = true
+        layer?.cornerRadius = 9
+        layer?.backgroundColor = normalBackground.cgColor
+        contentTintColor = .labelColor
+        cell?.wraps = true
+        cell?.lineBreakMode = .byWordWrapping
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setTitleColor(.labelColor)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking {
+            removeTrackingArea(tracking)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        animateBackground(to: hovered ? hoverBackground : normalBackground)
+        setTitleColor(hovered ? .white : .labelColor)
+    }
+
+    private func animateBackground(to color: NSColor) {
+        guard let layer else {
+            return
+        }
+        let animation = CABasicAnimation(keyPath: "backgroundColor")
+        animation.fromValue = layer.presentation()?.backgroundColor ?? layer.backgroundColor
+        animation.toValue = color.cgColor
+        animation.duration = 0.2
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: "backgroundColor")
+        layer.backgroundColor = color.cgColor
+    }
+
+    private func setTitleColor(_ color: NSColor) {
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+                .foregroundColor: color,
+                .paragraphStyle: {
+                    let style = NSMutableParagraphStyle()
+                    style.lineBreakMode = .byWordWrapping
+                    style.alignment = .left
+                    return style
+                }()
+            ]
+        )
+    }
+}
+
 func makeLabel(_ text: String, font: NSFont, color: NSColor = .labelColor) -> NSTextField {
     let label = NSTextField(labelWithString: text)
     label.font = font
@@ -369,18 +456,27 @@ func choiceButtonStyle(_ button: NSButton) {
     button.isBordered = false
     button.alignment = .left
     button.wantsLayer = true
-    button.layer?.cornerRadius = 8
+    button.layer?.cornerRadius = 9
     button.layer?.backgroundColor = NSColor(calibratedWhite: 0.955, alpha: 1).cgColor
     button.contentTintColor = .labelColor
+    button.cell?.wraps = true
+    button.cell?.lineBreakMode = .byWordWrapping
     button.attributedTitle = NSAttributedString(
         string: button.title,
         attributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-            .foregroundColor: NSColor.labelColor
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: {
+                let style = NSMutableParagraphStyle()
+                style.lineBreakMode = .byWordWrapping
+                style.alignment = .left
+                return style
+            }()
         ]
     )
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.setContentCompressionResistancePriority(.required, for: .horizontal)
+    button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    button.setContentHuggingPriority(.defaultLow, for: .horizontal)
 }
 
 func topRightOrigin(width: CGFloat, height: CGFloat) -> NSPoint {
@@ -479,9 +575,9 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
         }
     } else {
         optionViews = options.map { option in
-            let button = NSButton(title: option, target: choiceHandler, action: #selector(ChoiceButtonHandler.select(_:)))
+            let button = HoverChoiceButton(title: option, target: choiceHandler, action: #selector(ChoiceButtonHandler.select(_:)))
             choiceButtonStyle(button)
-            NSLayoutConstraint.activate([button.heightAnchor.constraint(equalToConstant: rowHeight)])
+            NSLayoutConstraint.activate([button.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)])
             return button
         }
     }
@@ -489,6 +585,7 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
     let optionStack = NSStackView(views: optionViews)
     optionStack.orientation = .vertical
     optionStack.spacing = 8
+    optionStack.alignment = .leading
     optionStack.translatesAutoresizingMaskIntoConstraints = false
 
     let optionScroll = NSScrollView()
@@ -540,6 +637,10 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
         cancel.widthAnchor.constraint(greaterThanOrEqualToConstant: 96),
         cancel.heightAnchor.constraint(equalToConstant: 28)
     ])
+    optionStack.widthAnchor.constraint(equalTo: optionScroll.contentView.widthAnchor).isActive = true
+    for optionView in optionViews {
+        optionView.widthAnchor.constraint(equalTo: optionStack.widthAnchor).isActive = true
+    }
     if multiSelect {
         submit.widthAnchor.constraint(greaterThanOrEqualToConstant: 104).isActive = true
         submit.heightAnchor.constraint(equalToConstant: 28).isActive = true
