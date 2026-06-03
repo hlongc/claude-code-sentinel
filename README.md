@@ -2,12 +2,31 @@
 
 中文 | [English](README.en.md)
 
-一个原生 macOS Claude Code 审批浮窗。Sentinel 会监听 Claude Code hooks，把权限确认和多选问题带到轻量桌面浮窗里，并在任务完成时提醒你。
+[![Release](https://img.shields.io/github/v/release/hlongc/claude-code-sentinel)](https://github.com/hlongc/claude-code-sentinel/releases)
+[![License](https://img.shields.io/github/license/hlongc/claude-code-sentinel)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-native-black)](#系统要求)
+[![Homebrew](https://img.shields.io/badge/Homebrew-hlongc%2Ftap-blue)](#homebrew)
+
+别再守着 Claude Code 终端等确认了。Claude Code Sentinel 会在需要你批准权限、回答多选问题或任务完成时，用原生 macOS 浮窗把你叫回来。
 
 它是 Swift 编译出的命令行二进制，日常使用不依赖 Node.js，也不受当前 `nvm` 版本影响。
 
+```sh
+brew tap hlongc/tap
+brew install claude-code-sentinel
+claude-code-sentinel install-managed
+```
+
+## Demo
+
+> 这里适合放一个 10-20 秒 GIF：Claude Code 请求权限，Sentinel 在右上角弹出审批浮窗，点击 `Yes` 后 Claude Code 继续执行。
+>
+> 建议文件路径：`assets/demo.gif`，之后可以用 `![Demo](assets/demo.gif)` 嵌入。
+
 ## 目录
 
+- [Demo](#demo)
+- [为什么需要它](#为什么需要它)
 - [功能特性](#功能特性)
 - [系统要求](#系统要求)
 - [快速开始](#快速开始)
@@ -18,6 +37,12 @@
 - [支持范围](#支持范围)
 - [开发](#开发)
 - [许可证](#许可证)
+
+## 为什么需要它
+
+Claude Code 很适合长时间执行任务，但它经常会停在权限确认、工具调用确认或多选问题上。如果你切去写文档、看网页或处理其他工作，任务可能已经卡住很久，而你完全不知道。
+
+Sentinel 做的事情很简单：它替你盯着 Claude Code。需要你决策时，它弹一个轻量浮窗；你做出选择后，结果会通过 Claude Code hooks 直接返回给当前会话。
 
 ## 功能特性
 

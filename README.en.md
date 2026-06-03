@@ -2,12 +2,31 @@
 
 [中文](README.md) | English
 
-A native macOS approval popover for Claude Code. Sentinel watches Claude Code hook events, brings permission prompts and multiple-choice questions to a lightweight desktop window, and notifies you when a task finishes.
+[![Release](https://img.shields.io/github/v/release/hlongc/claude-code-sentinel)](https://github.com/hlongc/claude-code-sentinel/releases)
+[![License](https://img.shields.io/github/license/hlongc/claude-code-sentinel)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-native-black)](#requirements)
+[![Homebrew](https://img.shields.io/badge/Homebrew-hlongc%2Ftap-blue)](#homebrew)
+
+Stop babysitting Claude Code. Claude Code Sentinel brings permission approvals, multiple-choice prompts, and completion notifications to a native macOS popover.
 
 It is built as a Swift command line binary, so normal use does not depend on Node.js or the active `nvm` version.
 
+```sh
+brew tap hlongc/tap
+brew install claude-code-sentinel
+claude-code-sentinel install-managed
+```
+
+## Demo
+
+> This is a good place for a 10-20 second GIF: Claude Code asks for permission, Sentinel shows an approval popover in the upper-right corner, and clicking `Yes` lets Claude Code continue.
+>
+> Suggested path: `assets/demo.gif`, then embed it with `![Demo](assets/demo.gif)`.
+
 ## Contents
 
+- [Demo](#demo)
+- [Why](#why)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
@@ -18,6 +37,12 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 - [What It Handles](#what-it-handles)
 - [Development](#development)
 - [License](#license)
+
+## Why
+
+Claude Code is great for long-running tasks, but it often stops for permission approvals, tool-use confirmations, or multiple-choice questions. If you have switched to another app, the task can sit blocked for a long time without you noticing.
+
+Sentinel watches those Claude Code hook events for you. When a decision is needed, it shows a lightweight macOS popover; after you choose, the result is returned directly to the Claude Code session through hooks.
 
 ## Features
 
