@@ -1,28 +1,42 @@
 # Claude Code Sentinel
 
-A native macOS approval popover for Claude Code. Sentinel watches Claude Code hook events, brings permission prompts and multiple-choice questions to a lightweight desktop window, and notifies you when a task finishes.
+中文 | [English](README.en.md)
 
-It is built as a Swift command line binary, so normal use does not depend on Node.js or the active `nvm` version.
+一个原生 macOS Claude Code 审批浮窗。Sentinel 会监听 Claude Code hooks，把权限确认和多选问题带到轻量桌面浮窗里，并在任务完成时提醒你。
 
-## Features
+它是 Swift 编译出的命令行二进制，日常使用不依赖 Node.js，也不受当前 `nvm` 版本影响。
 
-- Native macOS floating approval popover for `PermissionRequest`
-- `Yes`, `Yes, don't ask again`, and `No` actions that return decisions directly to Claude Code
-- `AskUserQuestion` support with one question shown at a time
-- Task completion and failure notifications
-- Session-aware titles for multiple Claude Code terminals
-- Drag-to-move popovers with fixed-width wrapping content
-- Active-terminal suppression: if you are actively using the Claude terminal, Sentinel stays quiet
-- Managed settings installer so tools that rewrite `~/.claude/settings.json` do not remove the hooks
+## 目录
 
-## Requirements
+- [功能特性](#功能特性)
+- [系统要求](#系统要求)
+- [快速开始](#快速开始)
+- [本地预览](#本地预览)
+- [配置方式](#配置方式)
+- [终端活跃时不打扰](#终端活跃时不打扰)
+- [支持范围](#支持范围)
+- [开发](#开发)
+- [许可证](#许可证)
+
+## 功能特性
+
+- 原生 macOS 浮动审批窗口，支持 `PermissionRequest`
+- 在浮窗中直接选择 `Yes`、`Yes, don't ask again` 或 `No`，并把决策返回给 Claude Code
+- 支持 `AskUserQuestion`，按问题逐个展示选项
+- 任务完成和失败通知
+- 标题包含项目和 session 信息，方便同时运行多个 Claude Code 任务
+- 浮窗可拖拽移动，固定宽度，长内容自动换行
+- 终端活跃时不打扰：如果你正在操作 Claude 终端，Sentinel 会保持安静
+- 支持安装到 Claude Code managed settings，避免 `cc switch` 等工具重写 `~/.claude/settings.json` 后丢失 hooks
+
+## 系统要求
 
 - macOS
-- Xcode Command Line Tools with `swiftc`
-- Node.js only for the managed settings install/uninstall helper
-- Claude Code with hooks support
+- Xcode Command Line Tools，需包含 `swiftc`
+- Node.js 仅用于 managed settings 安装/卸载辅助脚本
+- 支持 hooks 的 Claude Code
 
-## Quick Start
+## 快速开始
 
 ```sh
 git clone https://github.com/YOUR_USERNAME/claude-code-sentinel.git
@@ -31,42 +45,42 @@ make test
 make install-managed
 ```
 
-Then use Claude Code normally:
+然后正常使用 Claude Code：
 
 ```sh
 claude
 ```
 
-When Claude Code asks for permission or asks a multiple-choice question, Sentinel can show a popover in the upper-right corner. The selected answer is returned through the hook response, so you do not need to switch back to the terminal for supported hook events.
+当 Claude Code 请求权限或提出多选问题时，Sentinel 会在右上角显示浮窗。你的选择会通过 hook response 返回给 Claude Code，因此在受支持的 hook 事件里，你不需要切回终端操作。
 
-## Try It Locally
+## 本地预览
 
 ```sh
 make sample-permission
 make sample-stop
 ```
 
-`sample-permission` opens the approval popover. `sample-stop` sends a completion notification.
+`sample-permission` 会打开审批浮窗，`sample-stop` 会发送完成通知。
 
-## Configuration
+## 配置方式
 
 ### Managed Settings
 
-Recommended:
+推荐使用：
 
 ```sh
 make install-managed
 ```
 
-This writes:
+它会写入：
 
 ```text
 /Library/Application Support/ClaudeCode/managed-settings.json
 ```
 
-The installer preserves existing top-level managed settings and replaces only the `hooks` block. This is useful if another app rewrites `~/.claude/settings.json`.
+安装脚本会保留已有的顶层 managed settings，只替换 `hooks` 配置块。如果其他工具会重写 `~/.claude/settings.json`，这种方式更稳。
 
-Uninstall managed hooks:
+卸载 managed hooks：
 
 ```sh
 make uninstall-managed
@@ -74,60 +88,60 @@ make uninstall-managed
 
 ### User Settings
 
-If you prefer to manage Claude Code settings yourself:
+如果你更想自己管理 Claude Code 配置：
 
 ```sh
 make settings
 ```
 
-Add the printed `hooks` object to `~/.claude/settings.json`.
+把输出里的 `hooks` 对象添加到 `~/.claude/settings.json`。
 
-## Active Terminal Suppression
+## 终端活跃时不打扰
 
-If the foreground window looks like the same Claude Code terminal and macOS has received keyboard or mouse input recently, Sentinel suppresses the popover so the native terminal UI can handle the prompt.
+如果当前前台窗口看起来是同一个 Claude Code 终端，并且 macOS 最近收到过键盘或鼠标输入，Sentinel 会静默，让终端原生 UI 处理这个提示。
 
-Once the system has been idle for more than 20 seconds, or when another app is foreground, Sentinel shows the desktop prompt.
+如果系统空闲超过 20 秒，或者当前前台是其他 app，Sentinel 会显示桌面浮窗。
 
-Tune the idle threshold in the environment where you start `claude`:
+可以在启动 `claude` 的环境中调整空闲阈值：
 
 ```sh
 export CLAUDE_SENTINEL_ACTIVE_IDLE_SECONDS=30
 claude
 ```
 
-Debug decisions are written to:
+调试日志写在：
 
 ```text
 ~/Library/Logs/ClaudeCodeSentinel/hooks.log
 ```
 
-## What It Handles
+## 支持范围
 
-Sentinel uses Claude Code hooks, so it handles events Claude Code exposes through the hook system:
+Sentinel 基于 Claude Code hooks 工作，因此它能处理 Claude Code 通过 hook 系统暴露的事件：
 
 - `PermissionRequest`
-- `PreToolUse` for `AskUserQuestion`
+- `PreToolUse` 中的 `AskUserQuestion`
 - `Notification`
 - `Stop`
 - `StopFailure`
 
-It does not watch arbitrary interactive subprocess prompts inside a running shell command, such as a CLI asking `Continue? [y/N]` after Claude Code has already launched it. That would require a PTY wrapper layer.
+它不会监听已经运行中的 shell 命令内部交互提示。例如 Claude Code 启动某个 CLI 后，该 CLI 自己询问 `Continue? [y/N]`，这种情况需要额外的 PTY 包装层。
 
-## Development
+## 开发
 
 ```sh
 make build
 make test
 ```
 
-The binary is written to:
+二进制会输出到：
 
 ```text
 release/claude-code-sentinel
 ```
 
-Generated binaries are ignored by git.
+生成的二进制不会提交到 git。
 
-## License
+## 许可证
 
 MIT
