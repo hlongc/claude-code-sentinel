@@ -7,6 +7,7 @@ let maxNotificationChars = 180
 let defaultActiveIdleThresholdSeconds = 20.0
 let dialogMinWidth: CGFloat = 440
 let dialogMaxWidth: CGFloat = 520
+let managedSettingsPath = "/Library/Application Support/ClaudeCode/managed-settings.json"
 var activeDialogHandlers: [NSObject] = []
 var dialogMetaLine = ""
 
@@ -33,6 +34,14 @@ func jsonString(_ value: Any) -> String {
 func prettyJsonString(_ value: Any) -> String {
     let data = try! JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
     return String(data: data, encoding: .utf8)!
+}
+
+func parseJsonObject(from data: Data) throws -> [String: Any] {
+    if data.isEmpty {
+        return [:]
+    }
+    let value = try JSONSerialization.jsonObject(with: data, options: [])
+    return value as? [String: Any] ?? [:]
 }
 
 func appleQuote(_ value: String) -> String {
@@ -1028,6 +1037,123 @@ func buildHookSettings(commandPath: String) -> [String: Any] {
     ]
 }
 
+func managedSettingsURL() -> URL {
+    URL(fileURLWithPath: managedSettingsPath)
+}
+
+func readManagedSettings() throws -> [String: Any] {
+    let url = managedSettingsURL()
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        return [:]
+    }
+    return try parseJsonObject(from: Data(contentsOf: url))
+}
+
+func managedHooks(commandPath: String) -> [String: Any] {
+    buildHookSettings(commandPath: commandPath)["hooks"] as? [String: Any] ?? [:]
+}
+
+func writeJsonObject(_ object: [String: Any], to url: URL) throws {
+    var data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    data.append(0x0A)
+    try data.write(to: url)
+}
+
+func shellQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+}
+
+func writeManagedSettingsOrPrintSudo(_ settings: [String: Any]) throws -> Bool {
+    let url = managedSettingsURL()
+    do {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeJsonObject(settings, to: url)
+        return true
+    } catch {
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("claude-code-sentinel-managed-settings-\(Int(Date().timeIntervalSince1970)).json")
+        try writeJsonObject(settings, to: tempURL)
+        let command = [
+            "sudo mkdir -p",
+            shellQuote(url.deletingLastPathComponent().path),
+            "&&",
+            "sudo cp",
+            shellQuote(tempURL.path),
+            shellQuote(url.path),
+            "&&",
+            "sudo chmod 644",
+            shellQuote(url.path),
+            "&&",
+            "rm -f",
+            shellQuote(tempURL.path)
+        ].joined(separator: " ")
+
+        fputs("""
+        Unable to write \(url.path) without administrator privileges.
+        Run this command to finish:
+
+        \(command)
+
+        """, stderr)
+        return false
+    }
+}
+
+func installManagedSettings(commandPath: String) throws {
+    var settings = try readManagedSettings()
+    settings["hooks"] = managedHooks(commandPath: commandPath)
+    if try writeManagedSettingsOrPrintSudo(settings) {
+        print("Installed managed Claude Code hooks at \(managedSettingsPath)")
+    }
+}
+
+func uninstallManagedSettings() throws {
+    var settings = try readManagedSettings()
+    settings.removeValue(forKey: "hooks")
+    if try writeManagedSettingsOrPrintSudo(settings) {
+        print("Removed managed Claude Code hooks at \(managedSettingsPath)")
+    }
+}
+
+func commandPaths(in value: Any) -> [String] {
+    if let dictionary = value as? [String: Any] {
+        return dictionary.flatMap { key, child in
+            key == "command" ? [String(describing: child)] : commandPaths(in: child)
+        }
+    }
+    if let array = value as? [Any] {
+        return array.flatMap(commandPaths)
+    }
+    return []
+}
+
+func runDoctor() {
+    let binary = executablePath()
+    let fileManager = FileManager.default
+    print("Claude Code Sentinel doctor")
+    print("Binary: \(binary)")
+    print("Binary exists: \(fileManager.isExecutableFile(atPath: binary) ? "yes" : "no")")
+    print("Managed settings: \(managedSettingsPath)")
+
+    do {
+        let settings = try readManagedSettings()
+        guard let hooks = settings["hooks"] else {
+            print("Managed hooks: missing")
+            return
+        }
+        let commands = commandPaths(in: hooks)
+        let matching = commands.filter { $0.contains(binary) }
+        print("Managed hooks: present")
+        print("Hook commands: \(commands.count)")
+        print("Commands pointing to this binary: \(matching.count)")
+        if matching.count != commands.count {
+            print("Warning: some hook commands point to a different binary.")
+        }
+    } catch {
+        print("Managed settings read error: \(error)")
+    }
+}
+
 func printUsage() {
     print("""
     Claude Code Sentinel
@@ -1038,6 +1164,9 @@ func printUsage() {
       claude-code-sentinel notification         Handle Notification hook JSON from stdin
       claude-code-sentinel stop                 Handle Stop hook JSON from stdin
       claude-code-sentinel print-settings       Print Claude Code hooks JSON
+      claude-code-sentinel install-managed      Install hooks into Claude Code managed settings
+      claude-code-sentinel uninstall-managed    Remove hooks from Claude Code managed settings
+      claude-code-sentinel doctor               Check binary and managed hook configuration
       claude-code-sentinel sample-permission    Open a sample permission dialog
       claude-code-sentinel sample-stop          Send a sample completion notification
       claude-code-sentinel test                 Run lightweight self-tests
@@ -1077,6 +1206,8 @@ func runTests() {
     precondition(hooks?["PermissionRequest"] != nil)
     precondition(hooks?["Notification"] != nil)
     precondition(hooks?["Stop"] != nil)
+    precondition(!managedHooks(commandPath: "/tmp/claude-code-sentinel").isEmpty)
+    precondition(shellQuote("/tmp/a b/c") == "'/tmp/a b/c'")
     print("All tests passed.")
 }
 
@@ -1101,6 +1232,12 @@ func main() {
             handleStop(input)
         case "print-settings":
             print(prettyJsonString(buildHookSettings(commandPath: executablePath())))
+        case "install-managed":
+            try installManagedSettings(commandPath: executablePath())
+        case "uninstall-managed":
+            try uninstallManagedSettings()
+        case "doctor":
+            runDoctor()
         case "sample-permission":
             print(prettyJsonString(handlePermissionRequest(sampleInput())))
         case "sample-stop":
