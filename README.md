@@ -212,11 +212,24 @@ release/claude-code-sentinel
 创建 GitHub Release：
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-推送 `v*` tag 后，GitHub Actions 会构建 macOS universal binary，并上传到 GitHub Release。
+推送 `v*` tag 后，GitHub Actions 会：
+
+- 构建 macOS universal binary
+- 上传 GitHub Release 资产
+- 计算 SHA256
+- 自动更新 `hlongc/homebrew-tap` 中的 Formula
+
+要启用 Homebrew tap 自动更新，需要在 `hlongc/claude-code-sentinel` 仓库配置 secret：
+
+```text
+TAP_GITHUB_TOKEN
+```
+
+这个 token 建议使用 fine-grained PAT，只授予 `hlongc/homebrew-tap` 仓库 `Contents: Read and write` 权限。
 
 ## 许可证
 

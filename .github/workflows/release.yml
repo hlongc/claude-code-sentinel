@@ -12,10 +12,17 @@ jobs:
   build-macos:
     name: Build macOS universal binary
     runs-on: macos-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      sha256: ${{ steps.checksum.outputs.sha256 }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Release metadata
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Build arm64
         run: swiftc -O -target arm64-apple-macosx13.0 -o claude-code-sentinel-arm64 Sources/ClaudeCodeSentinel/main.swift
@@ -34,9 +41,60 @@ jobs:
           tar -czf dist/claude-code-sentinel-macos-universal.tar.gz claude-code-sentinel README.md README.en.md LICENSE
           shasum -a 256 dist/claude-code-sentinel-macos-universal.tar.gz > dist/claude-code-sentinel-macos-universal.tar.gz.sha256
 
+      - name: Capture checksum
+        id: checksum
+        run: echo "sha256=$(cut -d ' ' -f 1 dist/claude-code-sentinel-macos-universal.tar.gz.sha256)" >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/claude-code-sentinel-macos-universal.tar.gz
             dist/claude-code-sentinel-macos-universal.tar.gz.sha256
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    runs-on: ubuntu-latest
+    needs: build-macos
+
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: hlongc/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ needs.build-macos.outputs.version }}
+          SHA256: ${{ needs.build-macos.outputs.sha256 }}
+        run: |
+          ruby <<'RUBY'
+          version = ENV.fetch("VERSION")
+          sha256 = ENV.fetch("SHA256")
+          path = "Formula/claude-code-sentinel.rb"
+          formula = File.read(path)
+          formula.gsub!(
+            %r{https://github\.com/hlongc/claude-code-sentinel/releases/download/v[^/]+/claude-code-sentinel-macos-universal\.tar\.gz},
+            "https://github.com/hlongc/claude-code-sentinel/releases/download/#{version}/claude-code-sentinel-macos-universal.tar.gz"
+          )
+          formula.gsub!(/sha256 "[0-9a-f]{64}"/, %(sha256 "#{sha256}"))
+          File.write(path, formula)
+          RUBY
+
+      - name: Commit formula update
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ needs.build-macos.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/claude-code-sentinel.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+          git commit -m "chore(formula): update claude-code-sentinel to ${VERSION}"
+          git push

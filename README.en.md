@@ -212,11 +212,24 @@ Generated binaries are ignored by git.
 Create a GitHub release:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-After pushing a `v*` tag, GitHub Actions builds a macOS universal binary and uploads it to the GitHub Release.
+After pushing a `v*` tag, GitHub Actions:
+
+- builds a macOS universal binary
+- uploads GitHub Release assets
+- computes the SHA256 checksum
+- updates the Formula in `hlongc/homebrew-tap`
+
+To enable automatic Homebrew tap updates, configure this secret in the `hlongc/claude-code-sentinel` repository:
+
+```text
+TAP_GITHUB_TOKEN
+```
+
+Use a fine-grained PAT with `Contents: Read and write` access to the `hlongc/homebrew-tap` repository.
 
 ## License
 
