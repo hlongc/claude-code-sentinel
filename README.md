@@ -11,7 +11,7 @@
 - [功能特性](#功能特性)
 - [系统要求](#系统要求)
 - [快速开始](#快速开始)
-- [源码安装](#源码安装)
+- [安装方式](#安装方式)
 - [本地预览](#本地预览)
 - [配置方式](#配置方式)
 - [终端活跃时不打扰](#终端活跃时不打扰)
@@ -33,12 +33,12 @@
 ## 系统要求
 
 - macOS
-- Xcode Command Line Tools，需包含 `swiftc`
+- Xcode Command Line Tools，需包含 `swiftc`（仅源码编译时需要）
 - 支持 hooks 的 Claude Code
 
 ## 快速开始
 
-一行安装：
+一行安装。发布二进制存在时会直接下载二进制；否则会回退到源码编译：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
@@ -60,13 +60,35 @@ claude
 PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
-## 源码安装
+## 安装方式
+
+### 使用 Release 二进制
+
+默认安装脚本会下载 latest release：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
+```
+
+指定版本：
+
+```sh
+CLAUDE_SENTINEL_VERSION=v0.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
+```
+
+### 源码安装
 
 ```sh
 git clone git@github.com:hlongc/claude-code-sentinel.git
 cd claude-code-sentinel
 make test
-make install-managed
+make install
+```
+
+强制一键脚本从源码编译：
+
+```sh
+CLAUDE_SENTINEL_BUILD_FROM_SOURCE=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
 ## 本地预览
@@ -163,6 +185,15 @@ release/claude-code-sentinel
 ```
 
 生成的二进制不会提交到 git。
+
+创建 GitHub Release：
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+推送 `v*` tag 后，GitHub Actions 会构建 macOS universal binary，并上传到 GitHub Release。
 
 ## 许可证
 

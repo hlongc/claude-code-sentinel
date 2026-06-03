@@ -11,7 +11,7 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
-- [Install From Source](#install-from-source)
+- [Installation Options](#installation-options)
 - [Try It Locally](#try-it-locally)
 - [Configuration](#configuration)
 - [Active Terminal Suppression](#active-terminal-suppression)
@@ -33,12 +33,12 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 ## Requirements
 
 - macOS
-- Xcode Command Line Tools with `swiftc`
+- Xcode Command Line Tools with `swiftc` (only required when building from source)
 - Claude Code with hooks support
 
 ## Quick Start
 
-One-line install:
+One-line install. When a release binary exists, the installer downloads it directly; otherwise it falls back to a source build:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
@@ -60,13 +60,35 @@ Install somewhere else:
 PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
-## Install From Source
+## Installation Options
+
+### Release Binary
+
+By default, the installer downloads the latest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
+```
+
+Install a specific version:
+
+```sh
+CLAUDE_SENTINEL_VERSION=v0.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
+```
+
+### Install From Source
 
 ```sh
 git clone git@github.com:hlongc/claude-code-sentinel.git
 cd claude-code-sentinel
 make test
-make install-managed
+make install
+```
+
+Force the one-line installer to build from source:
+
+```sh
+CLAUDE_SENTINEL_BUILD_FROM_SOURCE=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
 ```
 
 ## Try It Locally
@@ -163,6 +185,15 @@ release/claude-code-sentinel
 ```
 
 Generated binaries are ignored by git.
+
+Create a GitHub release:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+After pushing a `v*` tag, GitHub Actions builds a macOS universal binary and uploads it to the GitHub Release.
 
 ## License
 

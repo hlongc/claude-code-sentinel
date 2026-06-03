@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS universal binary
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build arm64
+        run: swiftc -O -target arm64-apple-macosx13.0 -o claude-code-sentinel-arm64 Sources/ClaudeCodeSentinel/main.swift
+
+      - name: Build x86_64
+        run: swiftc -O -target x86_64-apple-macosx13.0 -o claude-code-sentinel-x86_64 Sources/ClaudeCodeSentinel/main.swift
+
+      - name: Create universal binary
+        run: |
+          lipo -create -output claude-code-sentinel claude-code-sentinel-arm64 claude-code-sentinel-x86_64
+          chmod +x claude-code-sentinel
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          tar -czf dist/claude-code-sentinel-macos-universal.tar.gz claude-code-sentinel README.md README.en.md LICENSE
+          shasum -a 256 dist/claude-code-sentinel-macos-universal.tar.gz > dist/claude-code-sentinel-macos-universal.tar.gz.sha256
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/claude-code-sentinel-macos-universal.tar.gz
+            dist/claude-code-sentinel-macos-universal.tar.gz.sha256
