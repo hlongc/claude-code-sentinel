@@ -28,6 +28,7 @@ claude-code-sentinel install-managed
 - [Demo](#demo)
 - [Why](#why)
 - [Features](#features)
+- [Keywords](#keywords)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Installation Options](#installation-options)
@@ -54,6 +55,10 @@ Sentinel watches those Claude Code hook events for you. When a decision is neede
 - Drag-to-move popovers with fixed-width wrapping content
 - Active-terminal suppression: if you are actively using the Claude terminal, Sentinel stays quiet
 - Managed settings installer so tools that rewrite `~/.claude/settings.json` do not remove the hooks
+
+## Keywords
+
+`claude-code` · `claude-code-hooks` · `macos` · `homebrew` · `developer-tools` · `ai-coding` · `notifications`
 
 ## Requirements
 
