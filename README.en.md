@@ -11,6 +11,7 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
+- [Install From Source](#install-from-source)
 - [Try It Locally](#try-it-locally)
 - [Configuration](#configuration)
 - [Active Terminal Suppression](#active-terminal-suppression)
@@ -37,11 +38,10 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 
 ## Quick Start
 
+One-line install:
+
 ```sh
-git clone git@github.com:hlongc/claude-code-sentinel.git
-cd claude-code-sentinel
-make test
-make install-managed
+curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
 ```
 
 Then use Claude Code normally:
@@ -51,6 +51,23 @@ claude
 ```
 
 When Claude Code asks for permission or asks a multiple-choice question, Sentinel can show a popover in the upper-right corner. The selected answer is returned through the hook response, so you do not need to switch back to the terminal for supported hook events.
+
+By default, the binary is installed to `~/.local/bin/claude-code-sentinel`. If `~/.local/bin` is not in your `PATH`, the installer prints a note.
+
+Install somewhere else:
+
+```sh
+PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
+```
+
+## Install From Source
+
+```sh
+git clone git@github.com:hlongc/claude-code-sentinel.git
+cd claude-code-sentinel
+make test
+make install-managed
+```
 
 ## Try It Locally
 

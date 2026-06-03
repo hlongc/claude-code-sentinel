@@ -1,8 +1,10 @@
 APP_NAME := claude-code-sentinel
 SRC := Sources/ClaudeCodeSentinel/main.swift
 OUT := release/$(APP_NAME)
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build test clean settings install-managed uninstall-managed sample-permission sample-stop
+.PHONY: build test clean settings install install-managed uninstall-managed doctor sample-permission sample-stop
 
 build: $(OUT)
 
@@ -15,6 +17,12 @@ test: $(OUT)
 
 settings: $(OUT)
 	$(OUT) print-settings
+
+install: $(OUT)
+	mkdir -p $(BINDIR)
+	cp $(OUT) $(BINDIR)/$(APP_NAME)
+	chmod +x $(BINDIR)/$(APP_NAME)
+	$(BINDIR)/$(APP_NAME) install-managed
 
 install-managed: $(OUT)
 	$(OUT) install-managed

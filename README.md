@@ -11,6 +11,7 @@
 - [功能特性](#功能特性)
 - [系统要求](#系统要求)
 - [快速开始](#快速开始)
+- [源码安装](#源码安装)
 - [本地预览](#本地预览)
 - [配置方式](#配置方式)
 - [终端活跃时不打扰](#终端活跃时不打扰)
@@ -37,11 +38,10 @@
 
 ## 快速开始
 
+一行安装：
+
 ```sh
-git clone git@github.com:hlongc/claude-code-sentinel.git
-cd claude-code-sentinel
-make test
-make install-managed
+curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh | bash
 ```
 
 然后正常使用 Claude Code：
@@ -51,6 +51,23 @@ claude
 ```
 
 当 Claude Code 请求权限或提出多选问题时，Sentinel 会在右上角显示浮窗。你的选择会通过 hook response 返回给 Claude Code，因此在受支持的 hook 事件里，你不需要切回终端操作。
+
+默认会把二进制安装到 `~/.local/bin/claude-code-sentinel`。如果 `~/.local/bin` 不在你的 `PATH` 中，安装脚本会给出提示。
+
+如果你想安装到其他位置：
+
+```sh
+PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc/claude-code-sentinel/main/install.sh)"
+```
+
+## 源码安装
+
+```sh
+git clone git@github.com:hlongc/claude-code-sentinel.git
+cd claude-code-sentinel
+make test
+make install-managed
+```
 
 ## 本地预览
 
