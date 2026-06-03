@@ -33,7 +33,6 @@ It is built as a Swift command line binary, so normal use does not depend on Nod
 
 - macOS
 - Xcode Command Line Tools with `swiftc`
-- Node.js only for the managed settings install/uninstall helper
 - Claude Code with hooks support
 
 ## Quick Start
@@ -84,6 +83,12 @@ Uninstall managed hooks:
 
 ```sh
 make uninstall-managed
+```
+
+Check the current binary and managed hook configuration:
+
+```sh
+make doctor
 ```
 
 ### User Settings

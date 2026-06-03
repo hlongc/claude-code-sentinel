@@ -17,10 +17,13 @@ settings: $(OUT)
 	$(OUT) print-settings
 
 install-managed: $(OUT)
-	node scripts/install-managed-settings.js $(OUT)
+	$(OUT) install-managed
 
-uninstall-managed:
-	node scripts/install-managed-settings.js --uninstall
+uninstall-managed: $(OUT)
+	$(OUT) uninstall-managed
+
+doctor: $(OUT)
+	$(OUT) doctor
 
 sample-permission: $(OUT)
 	$(OUT) sample-permission

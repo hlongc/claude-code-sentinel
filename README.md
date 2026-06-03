@@ -33,7 +33,6 @@
 
 - macOS
 - Xcode Command Line Tools，需包含 `swiftc`
-- Node.js 仅用于 managed settings 安装/卸载辅助脚本
 - 支持 hooks 的 Claude Code
 
 ## 快速开始
@@ -84,6 +83,12 @@ make install-managed
 
 ```sh
 make uninstall-managed
+```
+
+检查当前二进制和 managed hooks 配置：
+
+```sh
+make doctor
 ```
 
 ### User Settings
