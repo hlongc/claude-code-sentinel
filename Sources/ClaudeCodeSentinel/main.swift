@@ -401,6 +401,9 @@ func makeLabel(_ text: String, font: NSFont, color: NSColor = .labelColor) -> NS
 
 func makeBodyText(_ text: String, monospaced: Bool = false) -> NSScrollView {
     let textView = NSTextView()
+    let initialTextWidth = dialogMaxWidth - 40
+    textView.frame = NSRect(x: 0, y: 0, width: initialTextWidth, height: 120)
+    textView.autoresizingMask = [.width]
     textView.string = text
     textView.font = monospaced ? NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular) : NSFont.systemFont(ofSize: 12.5)
     textView.textColor = monospaced ? NSColor(calibratedWhite: 0.15, alpha: 1) : .labelColor
@@ -411,9 +414,13 @@ func makeBodyText(_ text: String, monospaced: Bool = false) -> NSScrollView {
     textView.isVerticallyResizable = true
     textView.textContainer?.widthTracksTextView = true
     textView.textContainer?.heightTracksTextView = false
+    textView.textContainer?.containerSize = NSSize(width: initialTextWidth, height: CGFloat.greatestFiniteMagnitude)
     textView.textContainer?.lineBreakMode = .byCharWrapping
     textView.textContainerInset = NSSize(width: monospaced ? 12 : 0, height: monospaced ? 10 : 0)
     textView.textContainer?.lineFragmentPadding = 0
+    if let textContainer = textView.textContainer {
+        textView.layoutManager?.ensureLayout(for: textContainer)
+    }
 
     let scroll = NSScrollView()
     scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -770,6 +777,7 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
         body.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
         body.topAnchor.constraint(equalTo: meta.bottomAnchor, constant: 10),
         body.bottomAnchor.constraint(equalTo: buttonStack.topAnchor, constant: -12),
+        body.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
 
         buttonStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
         buttonStack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -15),
@@ -1549,6 +1557,14 @@ func runTests() {
         "tool_name": "Write",
         "tool_input": ["file_path": "/tmp/bubbleSort.js"]
     ]).contains("Do you want to create bubbleSort.js?"))
+    precondition(formatToolInput([
+        "tool_name": "Edit",
+        "tool_input": [
+            "file_path": "/tmp/universalEdit.vue",
+            "old_string": "onSearch={(value) => this.handleRuleCodeSearch(value)}",
+            "new_string": "onFocus={() => { if (!row.ruleCode) this.ruleOptions = [] }}\nonSearch={(value) => this.handleRuleCodeSearch(value)}"
+        ]
+    ]).contains("Do you want to edit universalEdit.vue?"))
     precondition(formatToolInput([
         "tool_name": "Bash",
         "tool_input": [:],
