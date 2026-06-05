@@ -11,11 +11,27 @@ let activePollIntervalSeconds = 1.0
 let dialogMinWidth: CGFloat = 440
 let dialogMaxWidth: CGFloat = 520
 let managedSettingsPath = "/Library/Application Support/ClaudeCode/managed-settings.json"
+let openCodeConfigRelativePath = ".config/opencode/opencode.json"
+let openCodePluginRelativePath = ".config/opencode/plugins/claude-code-sentinel.js"
 var activeDialogHandlers: [NSObject] = []
 var dialogMetaLine = ""
 
 func readStdinData() -> Data {
     FileHandle.standardInput.readDataToEndOfFile()
+}
+
+func readPayloadData() throws -> Data {
+    let args = CommandLine.arguments
+    if let index = args.firstIndex(of: "--payload-base64"), index + 1 < args.count {
+        let encoded = args[index + 1]
+        guard let data = Data(base64Encoded: encoded) else {
+            throw NSError(domain: "ClaudeCodeSentinel", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid --payload-base64 value"
+            ])
+        }
+        return data
+    }
+    return readStdinData()
 }
 
 func parseHookInput(_ data: Data) throws -> [String: Any] {
@@ -32,6 +48,15 @@ func parseHookInput(_ data: Data) throws -> [String: Any] {
 func jsonString(_ value: Any) -> String {
     let data = try! JSONSerialization.data(withJSONObject: value, options: [])
     return String(data: data, encoding: .utf8)!
+}
+
+func jsonStringLiteral(_ value: String) -> String {
+    let escaped = value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\r", with: "\\r")
+        .replacingOccurrences(of: "\n", with: "\\n")
+    return "\"\(escaped)\""
 }
 
 func prettyJsonString(_ value: Any) -> String {
@@ -225,6 +250,131 @@ func formatToolInput(_ input: [String: Any]) -> String {
     return "Claude Code is requesting permission."
 }
 
+func openCodePermission(_ input: [String: Any]) -> [String: Any] {
+    dictValue(input, "permission")
+}
+
+func openCodeDirectory(_ input: [String: Any]) -> String {
+    let directory = stringValue(input, "directory")
+    if isMeaningfulText(directory) {
+        return directory
+    }
+    let worktree = stringValue(input, "worktree")
+    if isMeaningfulText(worktree) {
+        return worktree
+    }
+    return FileManager.default.currentDirectoryPath
+}
+
+func openCodeNormalizedInput(_ input: [String: Any]) -> [String: Any] {
+    let permission = openCodePermission(input)
+    let properties = dictValue(input, "properties")
+    return [
+        "cwd": openCodeDirectory(input),
+        "session_id": stringValue(permission, "sessionID").isEmpty ? stringValue(properties, "sessionID") : stringValue(permission, "sessionID"),
+        "tool_name": stringValue(permission, "type")
+    ]
+}
+
+func stringDescription(_ value: Any?) -> String {
+    guard let value else {
+        return ""
+    }
+    if let text = value as? String {
+        return text
+    }
+    return String(describing: value)
+}
+
+func lastPathComponent(_ path: String) -> String {
+    URL(fileURLWithPath: path).lastPathComponent
+}
+
+func firstMeaningfulText(_ values: String...) -> String {
+    values.first(where: isMeaningfulText) ?? ""
+}
+
+func diffFilePath(_ diff: String) -> String {
+    for line in diff.components(separatedBy: .newlines) {
+        if line.hasPrefix("Index: ") {
+            return String(line.dropFirst("Index: ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if line.hasPrefix("+++ ") {
+            let value = String(line.dropFirst("+++ ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.hasPrefix("b/") || value.hasPrefix("a/") ? String(value.dropFirst(2)) : value
+        }
+    }
+    return ""
+}
+
+func compactDiffPreview(_ diff: String) -> String {
+    var added = 0
+    var removed = 0
+    var preview: [String] = []
+    for line in diff.components(separatedBy: .newlines) {
+        if line.hasPrefix("+++") || line.hasPrefix("---") || line.hasPrefix("Index: ") || line.hasPrefix("====") {
+            continue
+        }
+        if line.hasPrefix("+") {
+            added += 1
+            if preview.count < 8 {
+                preview.append(line)
+            }
+        } else if line.hasPrefix("-") {
+            removed += 1
+            if preview.count < 8 {
+                preview.append(line)
+            }
+        }
+    }
+
+    var parts = ["Diff: +\(added) -\(removed)"]
+    if !preview.isEmpty {
+        parts.append("Preview:\n\(preview.joined(separator: "\n"))")
+    }
+    return parts.joined(separator: "\n\n")
+}
+
+func formatOpenCodePermission(_ input: [String: Any]) -> String {
+    let permission = openCodePermission(input)
+    let permissionType = stringValue(permission, "type")
+    let title = stringValue(permission, "title")
+    let metadata = dictValue(permission, "metadata")
+    let command = firstMeaningfulText(
+        stringValue(metadata, "command"),
+        stringDescription(permission["command"]),
+        stringDescription(permission["pattern"])
+    )
+    let diff = stringValue(metadata, "diff")
+    let path = firstMeaningfulText(
+        stringValue(metadata, "path"),
+        stringValue(metadata, "file"),
+        stringValue(metadata, "filePath"),
+        diffFilePath(diff)
+    )
+
+    var parts: [String] = []
+    if isMeaningfulText(title) {
+        parts.append(title)
+    } else if isMeaningfulText(command) {
+        parts.append("OpenCode wants to run a command.")
+    } else if isMeaningfulText(path) {
+        parts.append("OpenCode wants to edit \(lastPathComponent(path)).")
+    } else {
+        parts.append("OpenCode is requesting permission for \(permissionType.isEmpty ? "this action" : permissionType).")
+    }
+    if isMeaningfulText(command) {
+        parts.append("Command:\n\(command)")
+    }
+    if isMeaningfulText(path) {
+        parts.append("File:\n\(path)")
+    }
+    if isMeaningfulText(diff) {
+        parts.append(compactDiffPreview(diff))
+    }
+    return parts.joined(separator: "\n\n")
+}
+
 struct ScriptResult {
     let status: Int32
     let stdout: String
@@ -256,6 +406,13 @@ func runOsascript(_ script: String) -> ScriptResult {
 struct DialogResult {
     let canceled: Bool
     let button: String?
+    let selections: [String]
+
+    init(canceled: Bool, button: String?, selections: [String] = []) {
+        self.canceled = canceled
+        self.button = button
+        self.selections = selections
+    }
 }
 
 final class DialogButtonHandler: NSObject {
@@ -545,11 +702,13 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
     let optionViews: [NSView]
     let choiceHandler = ChoiceButtonHandler { value in
         selected = value
+        selectedOptions = [value]
         window.close()
         NSApplication.shared.stop(nil)
     }
     let multiHandler = MultiChoiceHandler {
-        selected = options.filter { selectedOptions.contains($0) }.joined(separator: ", ")
+        let selections = options.filter { selectedOptions.contains($0) }
+        selected = selections.joined(separator: ", ")
         window.close()
         NSApplication.shared.stop(nil)
     } onCancel: {
@@ -666,7 +825,10 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
 
     window.makeKeyAndOrderFront(nil)
     NSApplication.shared.run()
-    return DialogResult(canceled: canceled || selected == nil, button: selected)
+    let selections = selectedOptions.isEmpty
+        ? selected.map { [$0] } ?? []
+        : options.filter { selectedOptions.contains($0) }
+    return DialogResult(canceled: canceled || selected == nil, button: selected, selections: selections)
 }
 
 final class MultiSelectTarget: NSObject {
@@ -1262,6 +1424,109 @@ func handlePermissionRequest(_ input: [String: Any]) -> [String: Any] {
     return allowDecision()
 }
 
+func handleOpenCodePermission(_ input: [String: Any]) -> [String: Any] {
+    let normalized = openCodeNormalizedInput(input)
+    if shouldSuppressBecauseUserIsActive(event: "OpenCodePermission", input: normalized) {
+        return ["response": "reject"]
+    }
+
+    let permission = openCodePermission(input)
+    let permissionType = stringValue(permission, "type")
+    let title = titleFor(normalized, "\(permissionType.isEmpty ? "OpenCode" : permissionType) permission")
+    let cwd = openCodeDirectory(input)
+    dialogMetaLine = "\(permissionType.isEmpty ? "unknown action" : permissionType)  -  \(cwd)"
+    let body = truncate(formatOpenCodePermission(input), maxDialogChars)
+
+    let alwaysLabel = "Yes, always"
+    let choice = displayDialog(
+        title: title,
+        message: body,
+        buttons: ["No", "Yes", alwaysLabel],
+        defaultButton: "Yes",
+        cancelButton: "No"
+    )
+
+    if choice.canceled || choice.button == "No" {
+        return ["response": "reject"]
+    }
+    if choice.button == alwaysLabel {
+        return ["response": "always"]
+    }
+    return ["response": "once"]
+}
+
+func handleOpenCodeNotification(_ input: [String: Any]) {
+    let eventType = stringValue(input, "type")
+    let normalized = openCodeNormalizedInput(input)
+    if shouldSuppressBecauseUserIsActive(event: "OpenCodeNotification", input: normalized) {
+        return
+    }
+
+    let label = eventType == "session.error" ? "Failed" : (eventType == "tool.question" ? "Question" : "Done")
+    let title = titleFor(normalized, label)
+    let message: String
+    if eventType == "session.error" {
+        let error = input["error"] ?? dictValue(input, "properties")["error"] ?? "OpenCode session failed."
+        message = String(describing: error)
+    } else if eventType == "tool.question" {
+        message = "OpenCode is asking a question in the terminal."
+    } else {
+        message = "OpenCode session is idle."
+    }
+    displayNotification(title: title, message: message, subtitle: openCodeDirectory(input))
+}
+
+func handleOpenCodeQuestion(_ input: [String: Any]) -> [String: Any] {
+    let request = dictValue(input, "question")
+    let normalized: [String: Any] = [
+        "cwd": openCodeDirectory(input),
+        "session_id": stringValue(request, "sessionID"),
+        "tool_name": "question"
+    ]
+    if shouldSuppressBecauseUserIsActive(event: "OpenCodeQuestion", input: normalized) {
+        return ["action": "terminal"]
+    }
+
+    let questions = arrayValue(request, "questions")
+    if questions.isEmpty {
+        return ["action": "terminal"]
+    }
+
+    let meta = "OpenCode question  -  \(openCodeDirectory(input))"
+    var answers: [[String]] = []
+    for (index, question) in questions.enumerated() {
+        let questionText = stringValue(question, "question").isEmpty ? "Choose an option" : stringValue(question, "question")
+        let header = stringValue(question, "header")
+        let options = arrayValue(question, "options").compactMap { option -> String? in
+            let label = stringValue(option, "label")
+            return isMeaningfulText(label) ? label : nil
+        }
+        if options.isEmpty {
+            return ["action": "terminal"]
+        }
+
+        let multiSelect = question["multiple"] as? Bool ?? false
+        let title = titleFor(normalized, "\(header.isEmpty ? "Question" : header) \(index + 1)/\(questions.count)")
+        let choice = displayChoiceDialog(
+            title: title,
+            meta: meta,
+            question: questionText,
+            options: options,
+            multiSelect: multiSelect
+        )
+
+        if choice.canceled || choice.selections.isEmpty {
+            return ["action": "reject"]
+        }
+        answers.append(choice.selections)
+    }
+
+    return [
+        "action": "reply",
+        "answers": answers
+    ]
+}
+
 func handleNotification(_ input: [String: Any]) {
     if shouldSuppressIdlePromptAfterRecentStop(input) {
         return
@@ -1393,6 +1658,14 @@ func managedSettingsURL() -> URL {
     URL(fileURLWithPath: managedSettingsPath)
 }
 
+func openCodeConfigURL() -> URL {
+    URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(openCodeConfigRelativePath)
+}
+
+func openCodePluginURL() -> URL {
+    URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(openCodePluginRelativePath)
+}
+
 func readManagedSettings() throws -> [String: Any] {
     let url = managedSettingsURL()
     guard FileManager.default.fileExists(atPath: url.path) else {
@@ -1409,6 +1682,13 @@ func writeJsonObject(_ object: [String: Any], to url: URL) throws {
     var data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     data.append(0x0A)
     try data.write(to: url)
+}
+
+func readJsonObject(at url: URL) throws -> [String: Any] {
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        return [:]
+    }
+    return try parseJsonObject(from: Data(contentsOf: url))
 }
 
 func shellQuote(_ value: String) -> String {
@@ -1456,6 +1736,234 @@ func installManagedSettings(commandPath: String) throws {
     settings["hooks"] = managedHooks(commandPath: commandPath)
     if try writeManagedSettingsOrPrintSudo(settings) {
         print("Installed managed Claude Code hooks at \(managedSettingsPath)")
+    }
+}
+
+func openCodePluginSource(commandPath: String) -> String {
+    let binary = jsonStringLiteral(commandPath)
+    return """
+    import { appendFileSync, mkdirSync } from "node:fs"
+    import { homedir } from "node:os"
+    import { join } from "node:path"
+
+    const sentinel = \(binary)
+    const logDir = join(homedir(), "Library", "Logs", "ClaudeCodeSentinel")
+    const logFile = join(logDir, "opencode-plugin.log")
+
+    function log(message, extra) {
+      try {
+        mkdirSync(logDir, { recursive: true })
+        const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`
+        appendFileSync(logFile, `[${new Date().toISOString()}] ${message}${suffix}\\n`)
+      } catch {
+        // Never let diagnostic logging break OpenCode.
+      }
+    }
+
+    function runSentinel(command, payload) {
+      const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64")
+      const result = Bun.spawnSync([sentinel, command, "--payload-base64", encoded], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      if (result.exitCode !== 0) {
+        const stderr = new TextDecoder().decode(result.stderr).trim()
+        throw new Error(stderr || `claude-code-sentinel ${command} failed`)
+      }
+      return new TextDecoder().decode(result.stdout).trim()
+    }
+
+    function questionQuery(directory, worktree) {
+      return worktree?.startsWith?.("wrk")
+        ? { directory, workspace: worktree }
+        : { directory }
+    }
+
+    async function replyQuestion(client, requestID, directory, worktree, answers) {
+      if (!client._client?.post) throw new Error("OpenCode raw client is unavailable")
+      return await client._client.post({
+        url: "/question/{requestID}/reply",
+        path: { requestID },
+        query: questionQuery(directory, worktree),
+        body: { answers },
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    async function rejectQuestion(client, requestID, directory, worktree) {
+      if (!client._client?.post) throw new Error("OpenCode raw client is unavailable")
+      return await client._client.post({
+        url: "/question/{requestID}/reject",
+        path: { requestID },
+        query: questionQuery(directory, worktree),
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    export const ClaudeCodeSentinel = async ({ client, directory, worktree, serverUrl }) => {
+      log("plugin.init", { directory, worktree, serverUrl: String(serverUrl), clientKeys: Object.keys(client || {}) })
+
+      return {
+        event: async ({ event }) => {
+          if (event.type === "permission.updated" || event.type === "permission.asked") {
+            const permission = event.properties
+            log("permission.asked", { id: permission.id, sessionID: permission.sessionID, type: permission.type, directory })
+            const output = runSentinel("opencode-permission", {
+              type: event.type,
+              directory,
+              worktree,
+              permission,
+            })
+            const response = JSON.parse(output).response || "reject"
+            log("permission.result", { id: permission.id, sessionID: permission.sessionID, response })
+            try {
+              const reply = await client.postSessionIdPermissionsPermissionId({
+                path: {
+                  id: permission.sessionID,
+                  permissionID: permission.id,
+                },
+                query: { directory },
+                body: { response },
+              })
+              log("permission.reply.ok", { id: permission.id, reply })
+              if (reply?.error) throw new Error(JSON.stringify(reply.error))
+            } catch (error) {
+              log("permission.reply.error", { id: permission.id, error: String(error), stack: error?.stack })
+              throw error
+            }
+            return
+          }
+
+          if (event.type === "question.asked") {
+            const question = event.properties
+            log("question.asked", { id: question.id, directory, worktree, serverUrl: String(serverUrl), questions: question.questions?.length })
+            const output = runSentinel("opencode-question", {
+              type: event.type,
+              directory,
+              worktree,
+              question,
+            })
+            const result = JSON.parse(output)
+            log("question.result", { id: question.id, result })
+            if (result.action === "reply") {
+              try {
+                const response = await replyQuestion(client, question.id, directory, worktree, result.answers)
+                log("question.reply.ok", { id: question.id, response })
+                if (response?.error) throw new Error(JSON.stringify(response.error))
+              } catch (error) {
+                log("question.reply.error", { id: question.id, error: String(error), stack: error?.stack })
+                throw error
+              }
+            } else if (result.action === "reject") {
+              try {
+                const response = await rejectQuestion(client, question.id, directory, worktree)
+                log("question.reject.ok", { id: question.id, response })
+                if (response?.error) throw new Error(JSON.stringify(response.error))
+              } catch (error) {
+                log("question.reject.error", { id: question.id, error: String(error), stack: error?.stack })
+                throw error
+              }
+            } else {
+              log("question.noop", { id: question.id, action: result.action })
+            }
+            return
+          }
+
+          if (event.type === "session.idle" || event.type === "session.error") {
+            runSentinel("opencode-notification", {
+              type: event.type,
+              directory,
+              worktree,
+              properties: event.properties,
+            })
+            return
+          }
+
+          if (event.type === "tool.execute.before" && event.properties?.tool === "question") {
+            runSentinel("opencode-notification", {
+              type: "tool.question",
+              directory,
+              worktree,
+              properties: event.properties,
+            })
+          }
+        },
+      }
+    }
+    """
+}
+
+func mergedOpenCodeConfig(_ config: [String: Any]) -> [String: Any] {
+    var updated = config
+    if updated["$schema"] == nil {
+        updated["$schema"] = "https://opencode.ai/config.json"
+    }
+
+    if updated["permission"] == nil {
+        updated["permission"] = [
+            "edit": "ask",
+            "bash": "ask"
+        ]
+        return updated
+    }
+
+    guard var permissions = updated["permission"] as? [String: Any] else {
+        return updated
+    }
+    if permissions["edit"] == nil {
+        permissions["edit"] = "ask"
+    }
+    if permissions["bash"] == nil {
+        permissions["bash"] = "ask"
+    }
+    updated["permission"] = permissions
+    return updated
+}
+
+func installOpenCode(commandPath: String) throws {
+    let pluginURL = openCodePluginURL()
+    try FileManager.default.createDirectory(at: pluginURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try openCodePluginSource(commandPath: commandPath).write(to: pluginURL, atomically: true, encoding: .utf8)
+
+    let configURL = openCodeConfigURL()
+    try FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let config = try readJsonObject(at: configURL)
+    try writeJsonObject(mergedOpenCodeConfig(config), to: configURL)
+
+    print("Installed OpenCode plugin at \(pluginURL.path)")
+    print("Updated OpenCode config at \(configURL.path)")
+}
+
+func uninstallOpenCode() throws {
+    let pluginURL = openCodePluginURL()
+    if FileManager.default.fileExists(atPath: pluginURL.path) {
+        try FileManager.default.removeItem(at: pluginURL)
+        print("Removed OpenCode plugin at \(pluginURL.path)")
+    } else {
+        print("OpenCode plugin not found at \(pluginURL.path)")
+    }
+    print("OpenCode permission settings were left unchanged at \(openCodeConfigURL().path)")
+}
+
+func runOpenCodeDoctor() {
+    let pluginURL = openCodePluginURL()
+    let configURL = openCodeConfigURL()
+    let fileManager = FileManager.default
+    print("Claude Code Sentinel OpenCode doctor")
+    print("Plugin: \(pluginURL.path)")
+    print("Plugin exists: \(fileManager.fileExists(atPath: pluginURL.path) ? "yes" : "no")")
+    print("Config: \(configURL.path)")
+    do {
+        let config = try readJsonObject(at: configURL)
+        let permission = config["permission"]
+        print("Config exists: \(fileManager.fileExists(atPath: configURL.path) ? "yes" : "no")")
+        print("Permission config: \(permission == nil ? "missing" : "present")")
+        if let permissions = permission as? [String: Any] {
+            print("edit permission: \(permissions["edit"] ?? "missing")")
+            print("bash permission: \(permissions["bash"] ?? "missing")")
+        }
+    } catch {
+        print("OpenCode config read error: \(error)")
     }
 }
 
@@ -1515,10 +2023,16 @@ func printUsage() {
       claude-code-sentinel pre-tool-use         Handle PreToolUse hook JSON from stdin
       claude-code-sentinel notification         Handle Notification hook JSON from stdin
       claude-code-sentinel stop                 Handle Stop hook JSON from stdin
+      claude-code-sentinel opencode-permission  Handle OpenCode permission JSON from stdin
+      claude-code-sentinel opencode-notification Handle OpenCode notification JSON from stdin
+      claude-code-sentinel opencode-question    Handle OpenCode question JSON from stdin
       claude-code-sentinel print-settings       Print Claude Code hooks JSON
       claude-code-sentinel install-managed      Install hooks into Claude Code managed settings
+      claude-code-sentinel install-opencode     Install OpenCode plugin and permission config
       claude-code-sentinel uninstall-managed    Remove hooks from Claude Code managed settings
+      claude-code-sentinel uninstall-opencode   Remove OpenCode plugin
       claude-code-sentinel doctor               Check binary and managed hook configuration
+      claude-code-sentinel doctor-opencode      Check OpenCode plugin configuration
       claude-code-sentinel sample-permission    Open a sample permission dialog
       claude-code-sentinel sample-stop          Send a sample completion notification
       claude-code-sentinel test                 Run lightweight self-tests
@@ -1596,6 +2110,63 @@ func runTests() {
     recordStop(stopInput, now: Date(timeIntervalSince1970: 1_000))
     precondition(shouldSuppressIdlePromptAfterRecentStop(idleInput, now: Date(timeIntervalSince1970: 1_060)))
     precondition(!shouldSuppressIdlePromptAfterRecentStop(idleInput, now: Date(timeIntervalSince1970: 1_200)))
+    let openCodeConfig = mergedOpenCodeConfig([
+        "$schema": "https://opencode.ai/config.json",
+        "mcp": ["existing": ["enabled": true]],
+        "permission": ["edit": "deny"]
+    ])
+    precondition((openCodeConfig["mcp"] as? [String: Any])?["existing"] != nil)
+    let openCodePermissions = openCodeConfig["permission"] as? [String: Any]
+    precondition(openCodePermissions?["edit"] as? String == "deny")
+    precondition(openCodePermissions?["bash"] as? String == "ask")
+    let plugin = openCodePluginSource(commandPath: "/tmp/claude-code-sentinel")
+    precondition(plugin.contains("const sentinel = \"/tmp/claude-code-sentinel\""))
+    precondition(plugin.contains("postSessionIdPermissionsPermissionId"))
+    precondition(plugin.contains("permission.reply.ok"))
+    precondition(plugin.contains("replyQuestion(client"))
+    precondition(plugin.contains("\"/question/{requestID}/reply\""))
+    precondition(plugin.contains("\"/question/{requestID}/reject\""))
+    precondition(formatOpenCodePermission([
+        "permission": [
+            "type": "bash",
+            "title": "Run npm test",
+            "pattern": "npm test",
+            "metadata": ["command": "npm test"]
+        ]
+    ]).contains("Run npm test"))
+    let openCodeDiffBody = formatOpenCodePermission([
+        "permission": [
+            "metadata": [
+                "diff": """
+                Index: /Users/hulongchao/Documents/code/test-code/bubble-sort.ts
+                ===================================================================
+                --- /Users/hulongchao/Documents/code/test-code/bubble-sort.ts
+                +++ /Users/hulongchao/Documents/code/test-code/bubble-sort.ts
+                @@
+                +function bubbleSort(items: number[]): number[] {
+                +  return items
+                +}
+                """
+            ]
+        ]
+    ])
+    precondition(openCodeDiffBody.contains("OpenCode wants to edit bubble-sort.ts."))
+    precondition(openCodeDiffBody.contains("Diff: +3 -0"))
+    precondition(!openCodeDiffBody.contains("Metadata:"))
+    precondition(!openCodeDiffBody.contains("Permission:"))
+    precondition((handleOpenCodeQuestion([
+        "question": [
+            "id": "question-1",
+            "sessionID": "session-12345678",
+            "questions": [
+                [
+                    "question": "Pick one",
+                    "header": "Choice",
+                    "options": []
+                ]
+            ]
+        ]
+    ])["action"] as? String) == "terminal")
     print("All tests passed.")
 }
 
@@ -1618,14 +2189,29 @@ func main() {
         case "stop":
             let input = try parseHookInput(readStdinData())
             handleStop(input)
+        case "opencode-permission":
+            let input = try parseHookInput(readPayloadData())
+            print(jsonString(handleOpenCodePermission(input)))
+        case "opencode-notification":
+            let input = try parseHookInput(readPayloadData())
+            handleOpenCodeNotification(input)
+        case "opencode-question":
+            let input = try parseHookInput(readPayloadData())
+            print(jsonString(handleOpenCodeQuestion(input)))
         case "print-settings":
             print(prettyJsonString(buildHookSettings(commandPath: executablePath())))
         case "install-managed":
             try installManagedSettings(commandPath: executablePath())
+        case "install-opencode":
+            try installOpenCode(commandPath: executablePath())
         case "uninstall-managed":
             try uninstallManagedSettings()
+        case "uninstall-opencode":
+            try uninstallOpenCode()
         case "doctor":
             runDoctor()
+        case "doctor-opencode":
+            runOpenCodeDoctor()
         case "sample-permission":
             print(prettyJsonString(handlePermissionRequest(sampleInput())))
         case "sample-stop":
