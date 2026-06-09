@@ -95,6 +95,7 @@ After pushing a `v*` tag, GitHub Actions:
 
 - builds a macOS universal binary
 - uploads GitHub Release assets
+- generates GitHub Release notes from merged commits and PRs
 - computes the SHA256 checksum
 - updates the Formula in `hlongc/homebrew-tap`
 
