@@ -853,7 +853,7 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
         submit.heightAnchor.constraint(equalToConstant: 28).isActive = true
     }
 
-    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         if event.keyCode == 53 {
             canceled = true
             window.close()
@@ -865,6 +865,9 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
 
     window.makeKeyAndOrderFront(nil)
     NSApplication.shared.run()
+    if let keyMonitor {
+        NSEvent.removeMonitor(keyMonitor)
+    }
     let selections = selectedOptions.isEmpty
         ? selected.map { [$0] } ?? []
         : options.filter { selectedOptions.contains($0) }
@@ -932,6 +935,9 @@ func displayTextInputDialog(title: String, meta: String, prompt: String) -> Dial
 
     let handler = TextInputHandler {
         submittedText = textView.string
+        if !isMeaningfulText(submittedText) {
+            canceled = true
+        }
         window.close()
         NSApplication.shared.stop(nil)
     } onCancel: {
@@ -984,7 +990,7 @@ func displayTextInputDialog(title: String, meta: String, prompt: String) -> Dial
         submit.heightAnchor.constraint(equalToConstant: 28)
     ])
 
-    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         if event.keyCode == 53 {
             canceled = true
             window.close()
@@ -997,6 +1003,9 @@ func displayTextInputDialog(title: String, meta: String, prompt: String) -> Dial
     window.makeKeyAndOrderFront(nil)
     window.makeFirstResponder(textView)
     NSApplication.shared.run()
+    if let keyMonitor {
+        NSEvent.removeMonitor(keyMonitor)
+    }
     return DialogResult(canceled: canceled, button: nil, text: submittedText)
 }
 
@@ -1018,7 +1027,8 @@ func resolveQuestionAnswers(title: String, meta: String, question: String, selec
                 prompt: "Add details for:\n\(selection)"
             )
             if input.canceled {
-                return nil
+                resolved.append(selection)
+                continue
             }
             resolved.append(answerWithSupplement(option: selection, supplement: input.text ?? ""))
         } else {
@@ -1152,7 +1162,7 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
         button.heightAnchor.constraint(equalToConstant: 28).isActive = true
     }
 
-    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         if event.keyCode == 53 {
             selected = cancelButton
             canceled = true
@@ -1165,6 +1175,9 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
 
     window.makeKeyAndOrderFront(nil)
     NSApplication.shared.run()
+    if let keyMonitor {
+        NSEvent.removeMonitor(keyMonitor)
+    }
 
     return DialogResult(canceled: canceled, button: selected)
 }
