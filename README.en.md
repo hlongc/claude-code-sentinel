@@ -34,6 +34,7 @@ claude-code-sentinel install-managed
 - [Installation Options](#installation-options)
 - [Try It Locally](#try-it-locally)
 - [Configuration](#configuration)
+- [OpenCode Support](#opencode-support)
 - [Active Terminal Suppression](#active-terminal-suppression)
 - [What It Handles](#what-it-handles)
 - [Maintainer Guide](#maintainer-guide)
@@ -49,7 +50,8 @@ Sentinel watches those Claude Code hook events for you. When a decision is neede
 
 - Native macOS floating approval popover for `PermissionRequest`
 - `Yes`, `Yes, don't ask again`, and `No` actions that return decisions directly to Claude Code
-- `AskUserQuestion` support with one question shown at a time
+- `AskUserQuestion` support with one question shown at a time, including follow-up text input for options like "Other", "Discuss", or "Add more info"
+- OpenCode permission approvals, question prompts, and session notifications
 - Task completion and failure notifications
 - Session-aware titles for multiple Claude Code terminals
 - Drag-to-move popovers with fixed-width wrapping content
@@ -58,7 +60,7 @@ Sentinel watches those Claude Code hook events for you. When a decision is neede
 
 ## Keywords
 
-`claude-code` · `claude-code-hooks` · `macos` · `homebrew` · `developer-tools` · `ai-coding` · `notifications`
+`claude-code` · `claude-code-hooks` · `opencode` · `macos` · `homebrew` · `developer-tools` · `ai-coding` · `notifications`
 
 ## Requirements
 
@@ -74,6 +76,8 @@ Using Homebrew:
 brew tap hlongc/tap
 brew install claude-code-sentinel
 claude-code-sentinel install-managed
+# Optional: enable OpenCode support too
+claude-code-sentinel install-opencode
 ```
 
 Or use the one-line install script. When a release binary exists, the installer downloads it directly; otherwise it falls back to a source build:
@@ -106,6 +110,8 @@ PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc
 brew tap hlongc/tap
 brew install claude-code-sentinel
 claude-code-sentinel install-managed
+# Optional: enable OpenCode support too
+claude-code-sentinel install-opencode
 ```
 
 Upgrade:
@@ -193,6 +199,53 @@ make settings
 
 Add the printed `hooks` object to `~/.claude/settings.json`.
 
+## OpenCode Support
+
+The same `claude-code-sentinel` binary can support both Claude Code and OpenCode. Homebrew or the install script only installs the binary; each tool is enabled by its own setup command:
+
+```sh
+claude-code-sentinel install-managed   # enable Claude Code hooks
+claude-code-sentinel install-opencode  # enable the OpenCode plugin
+```
+
+After running both commands, Claude Code and OpenCode are both connected to Sentinel.
+
+`install-opencode` installs a small plugin at `~/.config/opencode/plugins/claude-code-sentinel.js` and preserves existing `~/.config/opencode/opencode.json` settings while ensuring `permission.edit` and `permission.bash` are set to `ask`.
+
+Install or update the OpenCode plugin:
+
+```sh
+make install-opencode
+```
+
+If installed with Homebrew:
+
+```sh
+claude-code-sentinel install-opencode
+```
+
+Check the OpenCode setup:
+
+```sh
+make doctor-opencode
+```
+
+Uninstall the plugin:
+
+```sh
+make uninstall-opencode
+```
+
+OpenCode support currently handles:
+
+- Permission requests with `No`, `Yes`, and `Yes, always`
+- `question.asked` prompts, answered from the desktop popover; options like "Other", "Discuss", or "Add more info" open a follow-up text input
+- `session.idle` and `session.error` completion or failure notifications
+
+When an OpenCode permission payload includes a large diff, Sentinel summarizes the file and line changes instead of dumping the full JSON payload or full diff into the popover.
+
+Restart the OpenCode session after installing or updating the plugin so OpenCode reloads the plugin file.
+
 ## Active Terminal Suppression
 
 If the foreground window looks like the same Claude Code terminal and macOS has received keyboard or mouse input recently, Sentinel suppresses the popover so the native terminal UI can handle the prompt.
@@ -226,7 +279,9 @@ Sentinel uses Claude Code hooks, so it handles events Claude Code exposes throug
 - `Stop`
 - `StopFailure`
 
-It does not watch arbitrary interactive subprocess prompts inside a running shell command, such as a CLI asking `Continue? [y/N]` after Claude Code has already launched it. That would require a PTY wrapper layer.
+OpenCode integration is handled through OpenCode plugin events for permissions, questions, and session notifications.
+
+It does not watch arbitrary interactive subprocess prompts inside a running shell command, such as a CLI asking `Continue? [y/N]` after Claude Code or OpenCode has already launched it. That would require a PTY wrapper layer.
 
 ## Maintainer Guide
 

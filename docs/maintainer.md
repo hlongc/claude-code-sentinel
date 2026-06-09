@@ -39,6 +39,49 @@ Switch back to the Homebrew build:
 /opt/homebrew/bin/claude-code-sentinel doctor
 ```
 
+## Testing A Local Build With OpenCode
+
+Install the OpenCode plugin that points to the local build:
+
+```sh
+make build
+make install-opencode
+```
+
+Verify:
+
+```sh
+make doctor-opencode
+```
+
+Restart the OpenCode session after installing the plugin. Smoke-test:
+
+- a `question.asked` prompt, confirming the selected answer reaches OpenCode
+- an `edit` or `bash` permission prompt, confirming `Yes`, `No`, and `Yes, always`
+- an idle/completion notification
+- a `session.error` notification
+
+Diagnostic logs:
+
+```text
+~/Library/Logs/ClaudeCodeSentinel/hooks.log
+~/Library/Logs/ClaudeCodeSentinel/opencode-plugin.log
+```
+
+The OpenCode installer must preserve unrelated keys in `~/.config/opencode/opencode.json`, especially existing `mcp` configuration.
+
+## Merge Checklist
+
+Before merging OpenCode support to `main`:
+
+- `make test` passes
+- `make doctor` passes for the intended Claude Code binary
+- `make doctor-opencode` passes for the intended OpenCode plugin
+- Claude Code `PermissionRequest`, `AskUserQuestion`, `Stop`, and `StopFailure` still behave as before
+- OpenCode permission, question reply, idle notification, and error notification smoke tests pass
+- README, README.en, and this maintainer guide describe the current commands
+- `release/` artifacts, local settings, logs, screenshots with secrets, and tokens are not staged
+
 ## Release Process
 
 Create a GitHub Release:
