@@ -19,10 +19,67 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Release metadata
         id: meta
         run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          current="${VERSION}"
+          previous="$(git tag --sort=-version:refname | grep -E '^v[0-9]+' | grep -v "^${current}$" | head -n 1 || true)"
+          if [ -n "$previous" ]; then
+            range="${previous}..${current}"
+          else
+            range="${current}"
+          fi
+
+          {
+            echo "## Changes"
+            echo
+
+            features="$(git log --format='- %s' "$range" --grep='^feat' || true)"
+            fixes="$(git log --format='- %s' "$range" --grep='^fix' || true)"
+            docs="$(git log --format='- %s' "$range" --grep='^docs' || true)"
+            ci="$(git log --format='- %s' "$range" --grep='^ci' || true)"
+            other="$(git log --format='- %s' "$range" --invert-grep --grep='^feat' --grep='^fix' --grep='^docs' --grep='^ci' || true)"
+
+            if [ -n "$features" ]; then
+              echo "### Features"
+              echo "$features"
+              echo
+            fi
+            if [ -n "$fixes" ]; then
+              echo "### Fixes"
+              echo "$fixes"
+              echo
+            fi
+            if [ -n "$docs" ]; then
+              echo "### Documentation"
+              echo "$docs"
+              echo
+            fi
+            if [ -n "$ci" ]; then
+              echo "### CI"
+              echo "$ci"
+              echo
+            fi
+            if [ -n "$other" ]; then
+              echo "### Other"
+              echo "$other"
+              echo
+            fi
+
+            if [ -n "$previous" ]; then
+              echo "## Full Changelog"
+              echo
+              echo "https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...${current}"
+            fi
+          } > release-notes.md
 
       - name: Build arm64
         run: swiftc -O -target arm64-apple-macosx13.0 -o claude-code-sentinel-arm64 Sources/ClaudeCodeSentinel/main.swift
@@ -48,7 +105,7 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             dist/claude-code-sentinel-macos-universal.tar.gz
             dist/claude-code-sentinel-macos-universal.tar.gz.sha256
