@@ -76,6 +76,8 @@ Using Homebrew:
 brew tap hlongc/tap
 brew install claude-code-sentinel
 claude-code-sentinel install-managed
+# Optional: enable OpenCode support too
+claude-code-sentinel install-opencode
 ```
 
 Or use the one-line install script. When a release binary exists, the installer downloads it directly; otherwise it falls back to a source build:
@@ -108,6 +110,8 @@ PREFIX=/usr/local bash -c "$(curl -fsSL https://raw.githubusercontent.com/hlongc
 brew tap hlongc/tap
 brew install claude-code-sentinel
 claude-code-sentinel install-managed
+# Optional: enable OpenCode support too
+claude-code-sentinel install-opencode
 ```
 
 Upgrade:
@@ -197,7 +201,16 @@ Add the printed `hooks` object to `~/.claude/settings.json`.
 
 ## OpenCode Support
 
-Sentinel can also run as an OpenCode plugin. It installs a small plugin at `~/.config/opencode/plugins/claude-code-sentinel.js` and preserves existing `~/.config/opencode/opencode.json` settings while ensuring `permission.edit` and `permission.bash` are set to `ask`.
+The same `claude-code-sentinel` binary can support both Claude Code and OpenCode. Homebrew or the install script only installs the binary; each tool is enabled by its own setup command:
+
+```sh
+claude-code-sentinel install-managed   # enable Claude Code hooks
+claude-code-sentinel install-opencode  # enable the OpenCode plugin
+```
+
+After running both commands, Claude Code and OpenCode are both connected to Sentinel.
+
+`install-opencode` installs a small plugin at `~/.config/opencode/plugins/claude-code-sentinel.js` and preserves existing `~/.config/opencode/opencode.json` settings while ensuring `permission.edit` and `permission.bash` are set to `ask`.
 
 Install or update the OpenCode plugin:
 
