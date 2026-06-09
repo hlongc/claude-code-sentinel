@@ -232,6 +232,10 @@ func formatToolInput(_ input: [String: Any]) -> String {
         }.joined(separator: "\n\n")
     }
 
+    if tool == "ExitPlanMode" {
+        return formatExitPlanMode(input)
+    }
+
     let renderedInput = toolInput.isEmpty ? "" : prettyJsonString(toolInput)
     if isMeaningfulText(renderedInput) {
         return renderedInput
@@ -248,6 +252,34 @@ func formatToolInput(_ input: [String: Any]) -> String {
     }
 
     return "Claude Code is requesting permission."
+}
+
+func formatExitPlanMode(_ input: [String: Any]) -> String {
+    let toolInput = dictValue(input, "tool_input")
+    let plan = stringValue(toolInput, "plan")
+    let planFilePath = stringValue(toolInput, "planFilePath")
+    let allowedPrompts = toolInput["allowedPrompts"] as? [[String: Any]] ?? []
+    var parts: [String] = []
+
+    if isMeaningfulText(plan) {
+        parts.append("Plan:\n\(plan)")
+    }
+    if isMeaningfulText(planFilePath) {
+        parts.append("Plan file:\n\(planFilePath)")
+    }
+    if !allowedPrompts.isEmpty {
+        let prompts = allowedPrompts.map { prompt in
+            let tool = prompt["tool"] as? String ?? "Tool"
+            let text = prompt["prompt"] as? String ?? ""
+            return "- \(tool): \(text.isEmpty ? "*" : text)"
+        }.joined(separator: "\n")
+        parts.append("Requested auto-accept prompts:\n\(prompts)")
+    }
+
+    if parts.isEmpty {
+        return "Claude Code is asking to exit plan mode and proceed with the plan."
+    }
+    return parts.joined(separator: "\n\n")
 }
 
 func openCodePermission(_ input: [String: Any]) -> [String: Any] {
@@ -312,6 +344,32 @@ func answerWithSupplement(option: String, supplement: String) -> String {
         return trimmed
     }
     return "\(option): \(trimmed)"
+}
+
+func answerAlreadyHasSupplement(_ answer: String) -> Bool {
+    guard optionNeedsTextInput(answer), let separator = answer.range(of: ":") else {
+        return false
+    }
+    return isMeaningfulText(String(answer[separator.upperBound...]))
+}
+
+func splitLeadingOptionMarker(_ option: String) -> (marker: String?, text: String) {
+    let trimmed = option.trimmingCharacters(in: .whitespacesAndNewlines)
+    var index = trimmed.startIndex
+    while index < trimmed.endIndex, trimmed[index].isNumber {
+        index = trimmed.index(after: index)
+    }
+    guard index > trimmed.startIndex, index < trimmed.endIndex else {
+        return (nil, trimmed)
+    }
+    let punctuation = trimmed[index]
+    guard [".", ")", "、", "．"].contains(String(punctuation)) else {
+        return (nil, trimmed)
+    }
+    let markerEnd = trimmed.index(after: index)
+    let marker = String(trimmed[..<markerEnd])
+    let text = String(trimmed[markerEnd...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    return (marker, isMeaningfulText(text) ? text : trimmed)
 }
 
 func diffFilePath(_ diff: String) -> String {
@@ -425,16 +483,23 @@ func runOsascript(_ script: String) -> ScriptResult {
 
 struct DialogResult {
     let canceled: Bool
+    let dismissed: Bool
     let button: String?
     let selections: [String]
     let text: String?
 
-    init(canceled: Bool, button: String?, selections: [String] = [], text: String? = nil) {
+    init(canceled: Bool, button: String?, dismissed: Bool = false, selections: [String] = [], text: String? = nil) {
         self.canceled = canceled
+        self.dismissed = dismissed
         self.button = button
         self.selections = selections
         self.text = text
     }
+}
+
+final class SentinelWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 final class DialogButtonHandler: NSObject {
@@ -497,9 +562,56 @@ final class TextInputHandler: NSObject {
     }
 }
 
+final class InlineTextFieldHandler: NSObject {
+    let onSubmit: (String) -> Void
+
+    init(onSubmit: @escaping (String) -> Void) {
+        self.onSubmit = onSubmit
+    }
+
+    @objc func submit(_ sender: NSTextField) {
+        onSubmit(sender.stringValue)
+    }
+}
+
+final class InlineSupplementField: NSTextField {
+    var onSubmit: ((String) -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 76 {
+            onSubmit?(stringValue)
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+final class InlineTextFocusView: NSView {
+    weak var field: NSTextField?
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKey()
+        if let field {
+            window?.makeFirstResponder(field)
+        }
+    }
+}
+
+final class DismissButtonHandler: NSObject {
+    let onDismiss: () -> Void
+
+    init(onDismiss: @escaping () -> Void) {
+        self.onDismiss = onDismiss
+    }
+
+    @objc func dismiss(_ sender: NSButton) {
+        onDismiss()
+    }
+}
+
 final class HoverChoiceButton: NSButton {
     private let normalBackground = NSColor(calibratedWhite: 0.955, alpha: 1)
-    private let hoverBackground = NSColor(calibratedRed: 0, green: 0.36, blue: 1, alpha: 1)
+    private let hoverBackground = NSColor(calibratedRed: 0.90, green: 0.95, blue: 1, alpha: 1)
     private var tracking: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
@@ -542,16 +654,18 @@ final class HoverChoiceButton: NSButton {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        NSCursor.pointingHand.push()
         setHovered(true)
     }
 
     override func mouseExited(with event: NSEvent) {
+        NSCursor.pop()
         setHovered(false)
     }
 
     private func setHovered(_ hovered: Bool) {
         animateBackground(to: hovered ? hoverBackground : normalBackground)
-        setTitleColor(hovered ? .white : .labelColor)
+        setTitleColor(hovered ? NSColor.systemBlue : .labelColor)
     }
 
     private func animateBackground(to color: NSColor) {
@@ -577,10 +691,44 @@ final class HoverChoiceButton: NSButton {
                     let style = NSMutableParagraphStyle()
                     style.lineBreakMode = .byWordWrapping
                     style.alignment = .left
+                    style.firstLineHeadIndent = 12
+                    style.headIndent = 12
+                    style.tailIndent = -12
                     return style
                 }()
             ]
         )
+    }
+}
+
+final class HoverDismissButton: NSButton {
+    private let normalBackground = NSColor(calibratedWhite: 0.94, alpha: 0.85)
+    private let hoverBackground = NSColor(calibratedWhite: 0.86, alpha: 1)
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking {
+            removeTrackingArea(tracking)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.pointingHand.push()
+        layer?.backgroundColor = hoverBackground.cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.pop()
+        layer?.backgroundColor = normalBackground.cgColor
     }
 }
 
@@ -657,6 +805,33 @@ func buttonStyle(_ button: NSButton, primary: Bool = false) {
     }
 }
 
+func dismissButtonStyle(_ button: NSButton) {
+    button.isBordered = false
+    button.wantsLayer = true
+    button.layer?.cornerRadius = 9
+    button.layer?.backgroundColor = NSColor(calibratedWhite: 0.94, alpha: 0.85).cgColor
+    button.attributedTitle = NSAttributedString(
+        string: button.title,
+        attributes: [
+            .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+    )
+    button.translatesAutoresizingMaskIntoConstraints = false
+}
+
+func addDismissButton(to root: NSView, windowWidth: CGFloat, windowHeight: CGFloat, handler: DismissButtonHandler) {
+    let button = HoverDismissButton(title: "×", target: handler, action: #selector(DismissButtonHandler.dismiss(_:)))
+    dismissButtonStyle(button)
+    root.addSubview(button)
+    NSLayoutConstraint.activate([
+        button.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+        button.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+        button.widthAnchor.constraint(equalToConstant: 24),
+        button.heightAnchor.constraint(equalToConstant: 24)
+    ])
+}
+
 func choiceButtonStyle(_ button: NSButton) {
     button.isBordered = false
     button.alignment = .left
@@ -671,13 +846,16 @@ func choiceButtonStyle(_ button: NSButton) {
         attributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
             .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: {
-                let style = NSMutableParagraphStyle()
-                style.lineBreakMode = .byWordWrapping
-                style.alignment = .left
-                return style
-            }()
-        ]
+                .paragraphStyle: {
+                    let style = NSMutableParagraphStyle()
+                    style.lineBreakMode = .byWordWrapping
+                    style.alignment = .left
+                    style.firstLineHeadIndent = 12
+                    style.headIndent = 12
+                    style.tailIndent = -12
+                    return style
+                }()
+            ]
     )
     button.translatesAutoresizingMaskIntoConstraints = false
     button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -703,6 +881,7 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
 
     var selected: String?
     var canceled = false
+    var dismissed = false
     var selectedOptions = Set<String>()
 
     let windowWidth: CGFloat = dialogWidth(defaultWidth: 430)
@@ -711,7 +890,7 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
     let windowHeight = min(max(196 + optionsHeight, 260), 430)
     let origin = topRightOrigin(width: windowWidth, height: windowHeight)
 
-    let window = NSWindow(
+    let window = SentinelWindow(
         contentRect: NSRect(origin: origin, size: NSSize(width: windowWidth, height: windowHeight)),
         styleMask: [.borderless],
         backing: .buffered,
@@ -758,6 +937,12 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
     }
     activeDialogHandlers.append(choiceHandler)
     activeDialogHandlers.append(multiHandler)
+    let dismissHandler = DismissButtonHandler {
+        dismissed = true
+        window.close()
+        NSApplication.shared.stop(nil)
+    }
+    activeDialogHandlers.append(dismissHandler)
 
     if multiSelect {
         optionViews = options.map { option in
@@ -782,6 +967,68 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
         }
     } else {
         optionViews = options.map { option in
+            if optionNeedsTextInput(option) {
+                let (marker, placeholder) = splitLeadingOptionMarker(option)
+                let field = InlineSupplementField()
+                field.placeholderString = placeholder
+                field.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+                field.textColor = .labelColor
+                field.isBordered = false
+                field.focusRingType = .none
+                field.backgroundColor = .clear
+                field.drawsBackground = false
+                field.translatesAutoresizingMaskIntoConstraints = false
+                field.cell?.wraps = false
+                field.cell?.lineBreakMode = .byTruncatingTail
+
+                let submitInlineText: (String) -> Void = { text in
+                    guard isMeaningfulText(text) else {
+                        return
+                    }
+                    let answer = answerWithSupplement(option: option, supplement: text)
+                    selected = answer
+                    selectedOptions = [answer]
+                    window.close()
+                    NSApplication.shared.stop(nil)
+                }
+                field.onSubmit = submitInlineText
+                let handler = InlineTextFieldHandler(onSubmit: submitInlineText)
+                activeDialogHandlers.append(handler)
+                field.target = handler
+                field.action = #selector(InlineTextFieldHandler.submit(_:))
+
+                let wrapper = InlineTextFocusView()
+                wrapper.field = field
+                wrapper.translatesAutoresizingMaskIntoConstraints = false
+                wrapper.wantsLayer = true
+                wrapper.layer?.cornerRadius = 9
+                wrapper.layer?.backgroundColor = NSColor(calibratedWhite: 0.955, alpha: 1).cgColor
+                wrapper.layer?.borderWidth = 0.5
+                wrapper.layer?.borderColor = NSColor(calibratedWhite: 0.88, alpha: 0.9).cgColor
+                let markerLabel = marker.map {
+                    makeLabel($0, font: NSFont.systemFont(ofSize: 13, weight: .medium), color: .secondaryLabelColor)
+                }
+                if let markerLabel {
+                    markerLabel.alignment = .right
+                    wrapper.addSubview(markerLabel)
+                }
+                wrapper.addSubview(field)
+                var constraints: [NSLayoutConstraint] = [
+                    wrapper.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
+                    field.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -12),
+                    field.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor)
+                ]
+                if let markerLabel {
+                    constraints.append(markerLabel.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 12))
+                    constraints.append(markerLabel.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor))
+                    constraints.append(markerLabel.widthAnchor.constraint(equalToConstant: 24))
+                    constraints.append(field.leadingAnchor.constraint(equalTo: markerLabel.trailingAnchor, constant: 6))
+                } else {
+                    constraints.append(field.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 12))
+                }
+                NSLayoutConstraint.activate(constraints)
+                return wrapper
+            }
             let button = HoverChoiceButton(title: option, target: choiceHandler, action: #selector(ChoiceButtonHandler.select(_:)))
             choiceButtonStyle(button)
             NSLayoutConstraint.activate([button.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)])
@@ -817,6 +1064,7 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
     root.addSubview(questionLabel)
     root.addSubview(optionScroll)
     root.addSubview(buttonStack)
+    addDismissButton(to: root, windowWidth: windowWidth, windowHeight: windowHeight, handler: dismissHandler)
     window.contentView = root
     window.minSize = NSSize(width: windowWidth, height: 180)
     window.maxSize = NSSize(width: windowWidth, height: 900)
@@ -824,7 +1072,7 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
 
     NSLayoutConstraint.activate([
         titleLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-        titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -20),
+        titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -52),
         titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
         subtitle.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
         subtitle.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
@@ -864,14 +1112,19 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
     }
 
     window.makeKeyAndOrderFront(nil)
+    window.initialFirstResponder = cancel
+    window.makeFirstResponder(cancel)
     NSApplication.shared.run()
     if let keyMonitor {
         NSEvent.removeMonitor(keyMonitor)
     }
-    let selections = selectedOptions.isEmpty
-        ? selected.map { [$0] } ?? []
-        : options.filter { selectedOptions.contains($0) }
-    return DialogResult(canceled: canceled || selected == nil, button: selected, selections: selections)
+    let selections: [String]
+    if multiSelect {
+        selections = options.filter { selectedOptions.contains($0) }
+    } else {
+        selections = selected.map { [$0] } ?? []
+    }
+    return DialogResult(canceled: !dismissed && (canceled || selected == nil), button: selected, dismissed: dismissed, selections: selections)
 }
 
 func displayTextInputDialog(title: String, meta: String, prompt: String) -> DialogResult {
@@ -883,7 +1136,7 @@ func displayTextInputDialog(title: String, meta: String, prompt: String) -> Dial
     let windowHeight: CGFloat = 330
     let origin = topRightOrigin(width: windowWidth, height: windowHeight)
 
-    let window = NSWindow(
+    let window = SentinelWindow(
         contentRect: NSRect(origin: origin, size: NSSize(width: windowWidth, height: windowHeight)),
         styleMask: [.borderless],
         backing: .buffered,
@@ -967,7 +1220,7 @@ func displayTextInputDialog(title: String, meta: String, prompt: String) -> Dial
 
     NSLayoutConstraint.activate([
         titleLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-        titleLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        titleLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -52),
         titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
         subtitle.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
         subtitle.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
@@ -1021,6 +1274,10 @@ func resolveQuestionAnswers(title: String, meta: String, question: String, selec
     var resolved: [String] = []
     for selection in selections {
         if optionNeedsTextInput(selection) {
+            if answerAlreadyHasSupplement(selection) {
+                resolved.append(selection)
+                continue
+            }
             let input = displayTextInputDialog(
                 title: title,
                 meta: meta,
@@ -1057,6 +1314,7 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
 
     var selected: String?
     var canceled = false
+    var dismissed = false
 
     NSApplication.shared.setActivationPolicy(.accessory)
 
@@ -1064,7 +1322,7 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
     let windowHeight: CGFloat = 260
     let origin = topRightOrigin(width: windowWidth, height: windowHeight)
 
-    let window = NSWindow(
+    let window = SentinelWindow(
         contentRect: NSRect(origin: origin, size: NSSize(width: windowWidth, height: windowHeight)),
         styleMask: [.borderless],
         backing: .buffered,
@@ -1107,6 +1365,12 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
         NSApplication.shared.stop(nil)
     }
     activeDialogHandlers.append(handler)
+    let dismissHandler = DismissButtonHandler {
+        dismissed = true
+        window.close()
+        NSApplication.shared.stop(nil)
+    }
+    activeDialogHandlers.append(dismissHandler)
 
     ([close, allow] + extraButtons).forEach {
         $0.target = handler
@@ -1124,6 +1388,7 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
     root.addSubview(meta)
     root.addSubview(body)
     root.addSubview(buttonStack)
+    addDismissButton(to: root, windowWidth: windowWidth, windowHeight: windowHeight, handler: dismissHandler)
     window.contentView = root
     window.minSize = NSSize(width: windowWidth, height: 220)
     window.maxSize = NSSize(width: windowWidth, height: 900)
@@ -1179,7 +1444,7 @@ func displayFloatingDialog(title: String, message: String, buttons: [String], de
         NSEvent.removeMonitor(keyMonitor)
     }
 
-    return DialogResult(canceled: canceled, button: selected)
+    return DialogResult(canceled: canceled, button: selected, dismissed: dismissed)
 }
 
 func displayDialog(title: String, message: String, buttons: [String], defaultButton: String, cancelButton: String?) -> DialogResult {
@@ -1508,8 +1773,11 @@ func firstAllowSuggestion(_ input: [String: Any]) -> [String: Any]? {
     }
 }
 
-func allowDecision(updatedPermissions: [[String: Any]]? = nil) -> [String: Any] {
+func allowDecision(updatedInput: [String: Any]? = nil, updatedPermissions: [[String: Any]]? = nil) -> [String: Any] {
     var decision: [String: Any] = ["behavior": "allow"]
+    if let updatedInput = updatedInput {
+        decision["updatedInput"] = updatedInput
+    }
     if let updatedPermissions = updatedPermissions {
         decision["updatedPermissions"] = updatedPermissions
     }
@@ -1517,6 +1785,16 @@ func allowDecision(updatedPermissions: [[String: Any]]? = nil) -> [String: Any] 
         "hookSpecificOutput": [
             "hookEventName": "PermissionRequest",
             "decision": decision
+        ]
+    ]
+}
+
+func sessionModePermission(_ mode: String) -> [[String: Any]] {
+    [
+        [
+            "type": "setMode",
+            "mode": mode,
+            "destination": "session"
         ]
     ]
 }
@@ -1559,10 +1837,6 @@ func handlePreToolUse(_ input: [String: Any]) -> [String: Any] {
         return [:]
     }
 
-    if shouldSuppressBecauseUserIsActive(event: "PreToolUse", input: input) {
-        return [:]
-    }
-
     var toolInput = dictValue(input, "tool_input")
     let questions = toolInput["questions"] as? [[String: Any]] ?? []
     if questions.isEmpty {
@@ -1595,6 +1869,9 @@ func handlePreToolUse(_ input: [String: Any]) -> [String: Any] {
                 options: options,
                 multiSelect: multiSelect
             )
+            if choice.dismissed {
+                return [:]
+            }
             if choice.canceled || choice.selections.isEmpty {
                 return preToolUseDenyDecision("User canceled the question from the desktop prompt.")
             }
@@ -1616,7 +1893,79 @@ func handlePreToolUse(_ input: [String: Any]) -> [String: Any] {
     return preToolUseAllowDecision(updatedInput: toolInput)
 }
 
+func handleExitPlanModePermission(_ input: [String: Any]) -> [String: Any] {
+    let toolInput = dictValue(input, "tool_input")
+    let title = titleFor(input, "Review plan")
+    let cwd = stringValue(input, "cwd").isEmpty ? "unknown" : stringValue(input, "cwd")
+    dialogMetaLine = "ExitPlanMode  -  \(cwd)"
+    let actionHelp = """
+    Actions:
+    Auto: proceed and auto-accept edits.
+    Manual: proceed but ask before edits.
+    Revise: send feedback to Claude.
+    """
+    let body = truncate("\(formatExitPlanMode(input))\n\n\(actionHelp)", maxDialogChars)
+    let autoLabel = "Auto"
+    let manualLabel = "Manual"
+    let changeLabel = "Revise"
+
+    let choice = displayDialog(
+        title: title,
+        message: body,
+        buttons: [changeLabel, manualLabel, autoLabel],
+        defaultButton: autoLabel,
+        cancelButton: changeLabel
+    )
+
+    if choice.dismissed {
+        return [:]
+    }
+
+    if choice.button == autoLabel {
+        return allowDecision(
+            updatedInput: toolInput,
+            updatedPermissions: sessionModePermission("acceptEdits")
+        )
+    }
+
+    if choice.button == manualLabel {
+        return allowDecision(
+            updatedInput: toolInput,
+            updatedPermissions: sessionModePermission("default")
+        )
+    }
+
+    let feedback = displayTextInputDialog(
+        title: title,
+        meta: dialogMetaLine,
+        prompt: "What should Claude change before proceeding?"
+    )
+    if feedback.dismissed {
+        return [:]
+    }
+    if feedback.canceled {
+        return denyDecision("User canceled the plan approval from the desktop prompt.")
+    }
+    return denyDecision(feedback.text ?? "Please revise the plan before proceeding.")
+}
+
 func handlePermissionRequest(_ input: [String: Any]) -> [String: Any] {
+    if stringValue(input, "tool_name") == "AskUserQuestion" {
+        appendDebugLog([
+            "event": "PermissionRequest",
+            "tool": "AskUserQuestion",
+            "project": projectName(input),
+            "session": sessionSuffix(input),
+            "decision": "ignore",
+            "reason": "AskUserQuestion"
+        ])
+        return [:]
+    }
+
+    if stringValue(input, "tool_name") == "ExitPlanMode" {
+        return handleExitPlanModePermission(input)
+    }
+
     if shouldSuppressBecauseUserIsActive(event: "PermissionRequest", input: input) {
         return [:]
     }
@@ -1624,7 +1973,7 @@ func handlePermissionRequest(_ input: [String: Any]) -> [String: Any] {
     let toolName = stringValue(input, "tool_name")
     let title = titleFor(input, "\(toolName.isEmpty ? "Tool" : toolName) permission")
     let allowSuggestion = firstAllowSuggestion(input)
-    let rememberLabel = "Yes, don't ask again"
+    let rememberLabel = "Always"
     let buttons = allowSuggestion == nil ? ["No", "Yes"] : ["No", "Yes", rememberLabel]
     let cwd = stringValue(input, "cwd").isEmpty ? "unknown" : stringValue(input, "cwd")
     dialogMetaLine = "\(toolName.isEmpty ? "unknown tool" : toolName)  -  \(cwd)"
@@ -1637,6 +1986,10 @@ func handlePermissionRequest(_ input: [String: Any]) -> [String: Any] {
         defaultButton: "Yes",
         cancelButton: "No"
     )
+
+    if choice.dismissed {
+        return [:]
+    }
 
     if choice.canceled || choice.button == "No" {
         return denyDecision("User denied the permission request from the desktop prompt.")
@@ -1662,7 +2015,7 @@ func handleOpenCodePermission(_ input: [String: Any]) -> [String: Any] {
     dialogMetaLine = "\(permissionType.isEmpty ? "unknown action" : permissionType)  -  \(cwd)"
     let body = truncate(formatOpenCodePermission(input), maxDialogChars)
 
-    let alwaysLabel = "Yes, always"
+    let alwaysLabel = "Always"
     let choice = displayDialog(
         title: title,
         message: body,
@@ -1670,6 +2023,10 @@ func handleOpenCodePermission(_ input: [String: Any]) -> [String: Any] {
         defaultButton: "Yes",
         cancelButton: "No"
     )
+
+    if choice.dismissed {
+        return ["action": "terminal"]
+    }
 
     if choice.canceled || choice.button == "No" {
         return ["response": "reject"]
@@ -1745,6 +2102,9 @@ func handleOpenCodeQuestion(_ input: [String: Any]) -> [String: Any] {
                 options: options,
                 multiSelect: multiSelect
             )
+            if choice.dismissed {
+                return ["action": "terminal"]
+            }
             if choice.canceled || choice.selections.isEmpty {
                 return ["action": "reject"]
             }
@@ -1815,10 +2175,33 @@ func executablePath() -> String {
     if raw.hasPrefix("/") {
         return raw
     }
+    if raw.contains("/") {
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(raw)
+            .standardizedFileURL
+            .path
+    }
+    if let resolved = resolveExecutableInPath(raw) {
+        return resolved
+    }
     return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         .appendingPathComponent(raw)
         .standardizedFileURL
         .path
+}
+
+func resolveExecutableInPath(_ name: String) -> String? {
+    let pathValue = ProcessInfo.processInfo.environment["PATH"] ?? ""
+    for directory in pathValue.split(separator: ":") {
+        let candidate = URL(fileURLWithPath: String(directory))
+            .appendingPathComponent(name)
+            .standardizedFileURL
+            .path
+        if FileManager.default.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+    }
+    return nil
 }
 
 func buildHookSettings(commandPath: String) -> [String: Any] {
@@ -2280,6 +2663,9 @@ func printUsage() {
       claude-code-sentinel doctor               Check binary and managed hook configuration
       claude-code-sentinel doctor-opencode      Check OpenCode plugin configuration
       claude-code-sentinel sample-permission    Open a sample permission dialog
+      claude-code-sentinel sample-exit-plan     Open a sample plan approval dialog
+      claude-code-sentinel sample-question      Open a sample question dialog
+      claude-code-sentinel sample-question-supplement Open a question dialog with a follow-up text option
       claude-code-sentinel sample-stop          Send a sample completion notification
       claude-code-sentinel test                 Run lightweight self-tests
     """)
@@ -2303,6 +2689,77 @@ func sampleInput() -> [String: Any] {
                 ],
                 "behavior": "allow",
                 "destination": "localSettings"
+            ]
+        ]
+    ]
+}
+
+func sampleExitPlanInput() -> [String: Any] {
+    [
+        "session_id": "sample-session-58dd7c23",
+        "cwd": FileManager.default.currentDirectoryPath,
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "ExitPlanMode",
+        "tool_input": [
+            "plan": """
+            ## Sample plan
+
+            1. Replace mock enum data with the backend /getEnums API.
+            2. Keep the table column configuration stable.
+            3. Run the dev server and verify the affected pages.
+            """,
+            "planFilePath": "\(NSHomeDirectory())/.claude/plans/sample-plan.md",
+            "allowedPrompts": [
+                ["tool": "Bash", "prompt": "install dependencies"],
+                ["tool": "Bash", "prompt": "run dev server"]
+            ]
+        ]
+    ]
+}
+
+func sampleQuestionInput() -> [String: Any] {
+    [
+        "session_id": "sample-session-58dd7c23",
+        "cwd": FileManager.default.currentDirectoryPath,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "AskUserQuestion",
+        "tool_input": [
+            "questions": [
+                [
+                    "question": "Should filter options be hardcoded or fetched from /getEnums?",
+                    "header": "Option source",
+                    "multiSelect": false,
+                    "options": [
+                        ["label": "Fetch from /getEnums (Recommended)"],
+                        ["label": "Keep hardcoded"],
+                        ["label": "Add more info"],
+                        ["label": "Chat about this"]
+                    ]
+                ]
+            ]
+        ]
+    ]
+}
+
+func sampleSupplementQuestionInput() -> [String: Any] {
+    [
+        "session_id": "sample-session-58dd7c23",
+        "cwd": FileManager.default.currentDirectoryPath,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "AskUserQuestion",
+        "tool_input": [
+            "questions": [
+                [
+                    "question": "How should Sentinel handle this implementation plan?",
+                    "header": "Plan review",
+                    "multiSelect": false,
+                    "options": [
+                        ["label": "1. Proceed with backend enums"],
+                        ["label": "2. Keep current hardcoded options"],
+                        ["label": "3. Skip plan and start immediately"],
+                        ["label": "4. Add more info"]
+                    ]
+                ]
             ]
         ]
     ]
@@ -2335,6 +2792,30 @@ func runTests() {
             ]
         ]
     ]).contains("Permission options"))
+    precondition(handlePermissionRequest([
+        "tool_name": "AskUserQuestion",
+        "cwd": "/tmp/my-project",
+        "session_id": "abc123456789"
+    ]).isEmpty)
+    let exitPlanInput: [String: Any] = [
+        "tool_name": "ExitPlanMode",
+        "tool_input": [
+            "plan": "## Plan\n- Update the API wiring",
+            "planFilePath": "/tmp/plan.md",
+            "allowedPrompts": [
+                ["tool": "Bash", "prompt": "run tests"]
+            ]
+        ]
+    ]
+    precondition(formatExitPlanMode(exitPlanInput).contains("Update the API wiring"))
+    precondition(formatExitPlanMode(exitPlanInput).contains("Bash: run tests"))
+    precondition(sessionModePermission("acceptEdits").first?["mode"] as? String == "acceptEdits")
+    precondition(formatExitPlanMode(sampleExitPlanInput()).contains("Sample plan"))
+    let sampleQuestions = dictValue(sampleQuestionInput(), "tool_input")["questions"] as? [[String: Any]]
+    precondition(sampleQuestions?.count == 1)
+    let supplementQuestions = dictValue(sampleSupplementQuestionInput(), "tool_input")["questions"] as? [[String: Any]]
+    let supplementOptions = supplementQuestions?.first?["options"] as? [[String: Any]]
+    precondition((supplementOptions?.last?["label"] as? String) == "4. Add more info")
     let settings = buildHookSettings(commandPath: "/tmp/claude-code-sentinel")
     let hooks = settings["hooks"] as? [String: Any]
     precondition(hooks?["PermissionRequest"] != nil)
@@ -2408,6 +2889,8 @@ func runTests() {
     precondition(!optionNeedsTextInput("1. Apply the plan"))
     precondition(answerWithSupplement(option: "4. 补充信息", supplement: "先只改 README") == "4. 补充信息: 先只改 README")
     precondition(answerWithSupplement(option: "Other", supplement: "  ") == "Other")
+    precondition(answerAlreadyHasSupplement("4. Add more info: use backend enums first"))
+    precondition(!answerAlreadyHasSupplement("4. Add more info"))
     print("All tests passed.")
 }
 
@@ -2455,6 +2938,12 @@ func main() {
             runOpenCodeDoctor()
         case "sample-permission":
             print(prettyJsonString(handlePermissionRequest(sampleInput())))
+        case "sample-exit-plan":
+            print(prettyJsonString(handlePermissionRequest(sampleExitPlanInput())))
+        case "sample-question":
+            print(prettyJsonString(handlePreToolUse(sampleQuestionInput())))
+        case "sample-question-supplement":
+            print(prettyJsonString(handlePreToolUse(sampleSupplementQuestionInput())))
         case "sample-stop":
             handleStop([
                 "session_id": "sample-session-12345678",

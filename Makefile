@@ -4,7 +4,7 @@ OUT := release/$(APP_NAME)
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build test clean settings install install-managed install-opencode uninstall-managed uninstall-opencode doctor doctor-opencode sample-permission sample-stop
+.PHONY: build test clean settings install install-managed install-opencode uninstall-managed uninstall-opencode doctor doctor-opencode sample-permission sample-exit-plan sample-question sample-question-supplement sample-stop
 
 build: $(OUT)
 
@@ -44,6 +44,15 @@ doctor-opencode: $(OUT)
 
 sample-permission: $(OUT)
 	$(OUT) sample-permission
+
+sample-exit-plan: $(OUT)
+	$(OUT) sample-exit-plan
+
+sample-question: $(OUT)
+	$(OUT) sample-question
+
+sample-question-supplement: $(OUT)
+	$(OUT) sample-question-supplement
 
 sample-stop: $(OUT)
 	$(OUT) sample-stop
