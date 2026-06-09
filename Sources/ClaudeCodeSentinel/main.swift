@@ -294,6 +294,26 @@ func firstMeaningfulText(_ values: String...) -> String {
     values.first(where: isMeaningfulText) ?? ""
 }
 
+func optionNeedsTextInput(_ option: String) -> Bool {
+    let value = option.lowercased()
+    let keywords = [
+        "补充", "追加", "说明", "讨论", "聊", "自定义", "其他", "其它", "反馈", "备注", "输入", "修改", "调整",
+        "other", "custom", "more info", "additional", "provide", "discuss", "clarify", "comment", "feedback", "message"
+    ]
+    return keywords.contains { value.contains($0) }
+}
+
+func answerWithSupplement(option: String, supplement: String) -> String {
+    let trimmed = supplement.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !isMeaningfulText(trimmed) {
+        return option
+    }
+    if !isMeaningfulText(option) {
+        return trimmed
+    }
+    return "\(option): \(trimmed)"
+}
+
 func diffFilePath(_ diff: String) -> String {
     for line in diff.components(separatedBy: .newlines) {
         if line.hasPrefix("Index: ") {
@@ -407,11 +427,13 @@ struct DialogResult {
     let canceled: Bool
     let button: String?
     let selections: [String]
+    let text: String?
 
-    init(canceled: Bool, button: String?, selections: [String] = []) {
+    init(canceled: Bool, button: String?, selections: [String] = [], text: String? = nil) {
         self.canceled = canceled
         self.button = button
         self.selections = selections
+        self.text = text
     }
 }
 
@@ -440,6 +462,24 @@ final class ChoiceButtonHandler: NSObject {
 }
 
 final class MultiChoiceHandler: NSObject {
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+
+    init(onSubmit: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.onSubmit = onSubmit
+        self.onCancel = onCancel
+    }
+
+    @objc func submit(_ sender: NSButton) {
+        onSubmit()
+    }
+
+    @objc func cancel(_ sender: NSButton) {
+        onCancel()
+    }
+}
+
+final class TextInputHandler: NSObject {
     let onSubmit: () -> Void
     let onCancel: () -> Void
 
@@ -829,6 +869,163 @@ func displayChoiceDialog(title: String, meta: String, question: String, options:
         ? selected.map { [$0] } ?? []
         : options.filter { selectedOptions.contains($0) }
     return DialogResult(canceled: canceled || selected == nil, button: selected, selections: selections)
+}
+
+func displayTextInputDialog(title: String, meta: String, prompt: String) -> DialogResult {
+    NSApplication.shared.setActivationPolicy(.accessory)
+
+    var canceled = false
+    var submittedText = ""
+    let windowWidth: CGFloat = dialogWidth(defaultWidth: 430)
+    let windowHeight: CGFloat = 330
+    let origin = topRightOrigin(width: windowWidth, height: windowHeight)
+
+    let window = NSWindow(
+        contentRect: NSRect(origin: origin, size: NSSize(width: windowWidth, height: windowHeight)),
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.level = .floating
+    window.isReleasedWhenClosed = false
+    window.backgroundColor = .clear
+    window.isOpaque = false
+    window.hasShadow = true
+    window.isMovableByWindowBackground = true
+    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+    let root = NSView()
+    root.wantsLayer = true
+    root.layer?.backgroundColor = NSColor(calibratedWhite: 0.99, alpha: 0.98).cgColor
+    root.layer?.cornerRadius = 16
+    root.layer?.borderWidth = 0.5
+    root.layer?.borderColor = NSColor(calibratedWhite: 0.84, alpha: 0.55).cgColor
+    root.translatesAutoresizingMaskIntoConstraints = false
+
+    let titleLabel = makeLabel(title, font: NSFont.systemFont(ofSize: 13.5, weight: .semibold))
+    let subtitle = makeLabel("Add a message", font: NSFont.systemFont(ofSize: 12), color: .secondaryLabelColor)
+    let metaLabel = makeLabel(meta, font: NSFont.systemFont(ofSize: 11.5), color: .secondaryLabelColor)
+    let promptLabel = makeLabel(prompt, font: NSFont.systemFont(ofSize: 14, weight: .semibold))
+
+    let textView = NSTextView()
+    textView.font = NSFont.systemFont(ofSize: 13)
+    textView.textColor = .labelColor
+    textView.backgroundColor = .clear
+    textView.isEditable = true
+    textView.isSelectable = true
+    textView.isHorizontallyResizable = false
+    textView.isVerticallyResizable = true
+    textView.textContainer?.widthTracksTextView = true
+    textView.textContainer?.containerSize = NSSize(width: windowWidth - 40, height: CGFloat.greatestFiniteMagnitude)
+    textView.textContainerInset = NSSize(width: 10, height: 9)
+
+    let textScroll = NSScrollView()
+    textScroll.translatesAutoresizingMaskIntoConstraints = false
+    textScroll.documentView = textView
+    textScroll.hasVerticalScroller = true
+    textScroll.drawsBackground = true
+    textScroll.backgroundColor = NSColor(calibratedWhite: 0.955, alpha: 1)
+    textScroll.wantsLayer = true
+    textScroll.layer?.cornerRadius = 9
+    textScroll.layer?.borderWidth = 0.5
+    textScroll.layer?.borderColor = NSColor(calibratedWhite: 0.84, alpha: 0.55).cgColor
+
+    let handler = TextInputHandler {
+        submittedText = textView.string
+        window.close()
+        NSApplication.shared.stop(nil)
+    } onCancel: {
+        canceled = true
+        window.close()
+        NSApplication.shared.stop(nil)
+    }
+    activeDialogHandlers.append(handler)
+
+    let cancel = NSButton(title: "Cancel", target: handler, action: #selector(TextInputHandler.cancel(_:)))
+    let submit = NSButton(title: "Submit", target: handler, action: #selector(TextInputHandler.submit(_:)))
+    buttonStyle(cancel)
+    buttonStyle(submit, primary: true)
+    let buttonStack = NSStackView(views: [cancel, submit])
+    buttonStack.orientation = .horizontal
+    buttonStack.spacing = 8
+    buttonStack.translatesAutoresizingMaskIntoConstraints = false
+
+    root.addSubview(titleLabel)
+    root.addSubview(subtitle)
+    root.addSubview(metaLabel)
+    root.addSubview(promptLabel)
+    root.addSubview(textScroll)
+    root.addSubview(buttonStack)
+    window.contentView = root
+    window.setContentSize(NSSize(width: windowWidth, height: windowHeight))
+
+    NSLayoutConstraint.activate([
+        titleLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+        titleLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
+        subtitle.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+        subtitle.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        subtitle.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+        metaLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+        metaLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        metaLabel.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 8),
+        promptLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+        promptLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        promptLabel.topAnchor.constraint(equalTo: metaLabel.bottomAnchor, constant: 12),
+        textScroll.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+        textScroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        textScroll.topAnchor.constraint(equalTo: promptLabel.bottomAnchor, constant: 12),
+        textScroll.bottomAnchor.constraint(equalTo: buttonStack.topAnchor, constant: -12),
+        buttonStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+        buttonStack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -15),
+        cancel.widthAnchor.constraint(greaterThanOrEqualToConstant: 96),
+        cancel.heightAnchor.constraint(equalToConstant: 28),
+        submit.widthAnchor.constraint(greaterThanOrEqualToConstant: 104),
+        submit.heightAnchor.constraint(equalToConstant: 28)
+    ])
+
+    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        if event.keyCode == 53 {
+            canceled = true
+            window.close()
+            NSApplication.shared.stop(nil)
+            return nil
+        }
+        return event
+    }
+
+    window.makeKeyAndOrderFront(nil)
+    window.makeFirstResponder(textView)
+    NSApplication.shared.run()
+    return DialogResult(canceled: canceled, button: nil, text: submittedText)
+}
+
+func resolveQuestionAnswers(title: String, meta: String, question: String, selections: [String]) -> [String]? {
+    if selections.isEmpty {
+        let input = displayTextInputDialog(title: title, meta: meta, prompt: question)
+        if input.canceled {
+            return nil
+        }
+        return [input.text ?? ""]
+    }
+
+    var resolved: [String] = []
+    for selection in selections {
+        if optionNeedsTextInput(selection) {
+            let input = displayTextInputDialog(
+                title: title,
+                meta: meta,
+                prompt: "Add details for:\n\(selection)"
+            )
+            if input.canceled {
+                return nil
+            }
+            resolved.append(answerWithSupplement(option: selection, supplement: input.text ?? ""))
+        } else {
+            resolved.append(selection)
+        }
+    }
+    return resolved
 }
 
 final class MultiSelectTarget: NSObject {
@@ -1366,25 +1563,40 @@ func handlePreToolUse(_ input: [String: Any]) -> [String: Any] {
     for (index, question) in questions.enumerated() {
         let questionText = question["question"] as? String ?? "Choose an option"
         let options = (question["options"] as? [[String: Any]] ?? []).compactMap { $0["label"] as? String }
-        if options.isEmpty {
-            continue
-        }
-
         let multiSelect = question["multiSelect"] as? Bool ?? false
         let title = titleFor(input, "Question \(index + 1)/\(questions.count)")
-        let choice = displayChoiceDialog(
-            title: title,
-            meta: meta,
-            question: questionText,
-            options: options,
-            multiSelect: multiSelect
-        )
+        let resolvedAnswers: [String]?
 
-        if choice.canceled || choice.button == nil {
-            return preToolUseDenyDecision("User canceled the question from the desktop prompt.")
+        if options.isEmpty {
+            resolvedAnswers = resolveQuestionAnswers(
+                title: title,
+                meta: meta,
+                question: questionText,
+                selections: []
+            )
+        } else {
+            let choice = displayChoiceDialog(
+                title: title,
+                meta: meta,
+                question: questionText,
+                options: options,
+                multiSelect: multiSelect
+            )
+            if choice.canceled || choice.selections.isEmpty {
+                return preToolUseDenyDecision("User canceled the question from the desktop prompt.")
+            }
+            resolvedAnswers = resolveQuestionAnswers(
+                title: title,
+                meta: meta,
+                question: questionText,
+                selections: choice.selections
+            )
         }
 
-        answers[questionText] = choice.button ?? ""
+        guard let resolvedAnswers else {
+            return preToolUseDenyDecision("User canceled the question from the desktop prompt.")
+        }
+        answers[questionText] = resolvedAnswers.joined(separator: ", ")
     }
 
     toolInput["answers"] = answers
@@ -1501,24 +1713,40 @@ func handleOpenCodeQuestion(_ input: [String: Any]) -> [String: Any] {
             let label = stringValue(option, "label")
             return isMeaningfulText(label) ? label : nil
         }
-        if options.isEmpty {
-            return ["action": "terminal"]
-        }
-
         let multiSelect = question["multiple"] as? Bool ?? false
         let title = titleFor(normalized, "\(header.isEmpty ? "Question" : header) \(index + 1)/\(questions.count)")
-        let choice = displayChoiceDialog(
-            title: title,
-            meta: meta,
-            question: questionText,
-            options: options,
-            multiSelect: multiSelect
-        )
+        let resolvedAnswers: [String]?
 
-        if choice.canceled || choice.selections.isEmpty {
+        if options.isEmpty {
+            resolvedAnswers = resolveQuestionAnswers(
+                title: title,
+                meta: meta,
+                question: questionText,
+                selections: []
+            )
+        } else {
+            let choice = displayChoiceDialog(
+                title: title,
+                meta: meta,
+                question: questionText,
+                options: options,
+                multiSelect: multiSelect
+            )
+            if choice.canceled || choice.selections.isEmpty {
+                return ["action": "reject"]
+            }
+            resolvedAnswers = resolveQuestionAnswers(
+                title: title,
+                meta: meta,
+                question: questionText,
+                selections: choice.selections
+            )
+        }
+
+        guard let resolvedAnswers else {
             return ["action": "reject"]
         }
-        answers.append(choice.selections)
+        answers.append(resolvedAnswers)
     }
 
     return [
@@ -2161,19 +2389,12 @@ func runTests() {
     precondition(openCodeDiffBody.contains("Diff: +3 -0"))
     precondition(!openCodeDiffBody.contains("Metadata:"))
     precondition(!openCodeDiffBody.contains("Permission:"))
-    precondition((handleOpenCodeQuestion([
-        "question": [
-            "id": "question-1",
-            "sessionID": "session-12345678",
-            "questions": [
-                [
-                    "question": "Pick one",
-                    "header": "Choice",
-                    "options": []
-                ]
-            ]
-        ]
-    ])["action"] as? String) == "terminal")
+    precondition(optionNeedsTextInput("4. 补充信息"))
+    precondition(optionNeedsTextInput("5. Discuss this plan"))
+    precondition(optionNeedsTextInput("Other"))
+    precondition(!optionNeedsTextInput("1. Apply the plan"))
+    precondition(answerWithSupplement(option: "4. 补充信息", supplement: "先只改 README") == "4. 补充信息: 先只改 README")
+    precondition(answerWithSupplement(option: "Other", supplement: "  ") == "Other")
     print("All tests passed.")
 }
 

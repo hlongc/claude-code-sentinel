@@ -50,7 +50,7 @@ Sentinel watches those Claude Code hook events for you. When a decision is neede
 
 - Native macOS floating approval popover for `PermissionRequest`
 - `Yes`, `Yes, don't ask again`, and `No` actions that return decisions directly to Claude Code
-- `AskUserQuestion` support with one question shown at a time
+- `AskUserQuestion` support with one question shown at a time, including follow-up text input for options like "Other", "Discuss", or "Add more info"
 - OpenCode permission approvals, question prompts, and session notifications
 - Task completion and failure notifications
 - Session-aware titles for multiple Claude Code terminals
@@ -226,7 +226,7 @@ make uninstall-opencode
 OpenCode support currently handles:
 
 - Permission requests with `No`, `Yes`, and `Yes, always`
-- `question.asked` prompts, answered from the desktop popover
+- `question.asked` prompts, answered from the desktop popover; options like "Other", "Discuss", or "Add more info" open a follow-up text input
 - `session.idle` and `session.error` completion or failure notifications
 
 When an OpenCode permission payload includes a large diff, Sentinel summarizes the file and line changes instead of dumping the full JSON payload or full diff into the popover.
