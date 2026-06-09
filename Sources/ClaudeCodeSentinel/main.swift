@@ -1427,7 +1427,7 @@ func handlePermissionRequest(_ input: [String: Any]) -> [String: Any] {
 func handleOpenCodePermission(_ input: [String: Any]) -> [String: Any] {
     let normalized = openCodeNormalizedInput(input)
     if shouldSuppressBecauseUserIsActive(event: "OpenCodePermission", input: normalized) {
-        return ["response": "reject"]
+        return ["action": "terminal"]
     }
 
     let permission = openCodePermission(input)
@@ -1814,7 +1814,12 @@ func openCodePluginSource(commandPath: String) -> String {
               worktree,
               permission,
             })
-            const response = JSON.parse(output).response || "reject"
+            const result = JSON.parse(output)
+            if (result.action === "terminal") {
+              log("permission.noop", { id: permission.id, sessionID: permission.sessionID, action: result.action })
+              return
+            }
+            const response = result.response || "reject"
             log("permission.result", { id: permission.id, sessionID: permission.sessionID, response })
             try {
               const reply = await client.postSessionIdPermissionsPermissionId({
@@ -2123,6 +2128,8 @@ func runTests() {
     precondition(plugin.contains("const sentinel = \"/tmp/claude-code-sentinel\""))
     precondition(plugin.contains("postSessionIdPermissionsPermissionId"))
     precondition(plugin.contains("permission.reply.ok"))
+    precondition(plugin.contains("permission.noop"))
+    precondition(plugin.contains("result.action === \"terminal\""))
     precondition(plugin.contains("replyQuestion(client"))
     precondition(plugin.contains("\"/question/{requestID}/reply\""))
     precondition(plugin.contains("\"/question/{requestID}/reject\""))
