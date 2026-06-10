@@ -42,37 +42,60 @@ jobs:
             echo "## Changes"
             echo
 
-            features="$(git log --format='- %s' "$range" --grep='^feat' || true)"
-            fixes="$(git log --format='- %s' "$range" --grep='^fix' || true)"
-            docs="$(git log --format='- %s' "$range" --grep='^docs' || true)"
-            ci="$(git log --format='- %s' "$range" --grep='^ci' || true)"
-            other="$(git log --format='- %s' "$range" --invert-grep --grep='^feat' --grep='^fix' --grep='^docs' --grep='^ci' || true)"
+            emit_commit_notes() {
+              sha="$1"
+              subject="$(git log -1 --format='%s' "$sha")"
+              body="$(git log -1 --format='%b' "$sha")"
+              notes="$(
+                printf '%s\n' "$body" |
+                  awk '
+                    BEGIN { capture = 0 }
+                    /^[Rr]elease notes:[[:space:]]*$/ { capture = 1; next }
+                    capture && /^[[:space:]]*$/ { exit }
+                    capture { print }
+                  '
+              )"
 
-            if [ -n "$features" ]; then
-              echo "### Features"
-              echo "$features"
+              if [ -z "$notes" ]; then
+                notes="$(printf '%s\n' "$body" | grep -E '^[[:space:]]*[-*] ' || true)"
+              fi
+
+              if [ -n "$notes" ]; then
+                printf '%s\n' "$notes" | sed -E '
+                  s/^[[:space:]]*[-*][[:space:]]*/- /
+                  t
+                  s/^/- /
+                '
+              else
+                echo "- ${subject}"
+              fi
+            }
+
+            emit_section() {
+              title="$1"
+              shift
+              shas="$(git log --reverse --format='%H' "$range" "$@" || true)"
+              if [ -z "$shas" ]; then
+                return
+              fi
+
+              echo "### ${title}"
+              for sha in $shas; do
+                emit_commit_notes "$sha"
+              done
               echo
-            fi
-            if [ -n "$fixes" ]; then
-              echo "### Fixes"
-              echo "$fixes"
-              echo
-            fi
-            if [ -n "$docs" ]; then
-              echo "### Documentation"
-              echo "$docs"
-              echo
-            fi
-            if [ -n "$ci" ]; then
-              echo "### CI"
-              echo "$ci"
-              echo
-            fi
-            if [ -n "$other" ]; then
-              echo "### Other"
-              echo "$other"
-              echo
-            fi
+            }
+
+            emit_section "Features" --grep='^feat[(:]'
+            emit_section "Fixes" --grep='^fix[(:]'
+            emit_section "Documentation" --grep='^docs[(:]'
+            emit_section "Other" \
+              --invert-grep \
+              --grep='^feat[(:]' \
+              --grep='^fix[(:]' \
+              --grep='^docs[(:]' \
+              --grep='^ci[(:]' \
+              --grep='^chore[(:]'
 
             if [ -n "$previous" ]; then
               echo "## Full Changelog"
